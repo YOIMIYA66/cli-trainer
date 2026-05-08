@@ -1,0 +1,117 @@
+# 测试环境 baseModel 白名单
+# key: 完整两段式 git_login/repo_name，与入参严格匹配
+# template: LlamaFactory 对应的 chat template 名称
+# train_tool: 训练工具 (llamafactory / paddleformers)
+hetiechao/Qwen2.5-0.5B-Instruct:
+  template: "qwen"
+  train_tool: "llamafactory"
+
+# ── Qwen ─────────────────────────────────────────────────────────────────────
+PaddleNLP/Qwen3-32B:
+  template: "qwen"
+  train_tool: "llamafactory"
+  note: "平台 Transformers 版本可能不兼容，优先推荐 ModelHub/Qwen2.5-*"
+
+PaddleNLP/Qwen3-14B:
+  template: "qwen"
+  train_tool: "llamafactory"
+  note: "平台 Transformers 版本可能不兼容，优先推荐 ModelHub/Qwen2.5-*"
+
+PaddleNLP/Qwen3-8B:
+  template: "qwen"
+  train_tool: "llamafactory"
+  note: "平台 Transformers 版本可能不兼容，优先推荐 ModelHub/Qwen2.5-*"
+
+PaddleNLP/Qwen3-4B:
+  template: "qwen"
+  train_tool: "llamafactory"
+  note: "平台 Transformers 版本可能不兼容，优先推荐 ModelHub/Qwen2.5-*"
+
+ModelHub/Qwen2.5-14B-Instruct:
+  template: "qwen"
+  train_tool: "llamafactory"
+
+ModelHub/Qwen2.5-7B-Instruct:
+  template: "qwen"
+  train_tool: "llamafactory"
+
+ModelHub/Qwen2.5-3B-Instruct:
+  template: "qwen"
+  train_tool: "llamafactory"
+
+# ── DeepSeek ──────────────────────────────────────────────────────────────────
+ModelHub/DeepSeek-R1-Distill-Qwen-32B:
+  template: "deepseek_r1"
+  train_tool: "llamafactory"
+
+ModelHub/DeepSeek-R1-Distill-Qwen-14B:
+  template: "deepseek_r1"
+  train_tool: "llamafactory"
+
+ModelHub/DeepSeek-R1-Distill-Qwen-7B:
+  template: "deepseek_r1"
+  train_tool: "llamafactory"
+
+ModelHub/DeepSeek-R1-Distill-Llama-8B:
+  template: "deepseek_r1"
+  train_tool: "llamafactory"
+
+ModelHub/DeepSeek-R1-Distill-Qwen-1.5B:
+  template: "deepseek_r1"
+  train_tool: "llamafactory"
+
+# ── OpenBMB ───────────────────────────────────────────────────────────────────
+ModelHub/MiniCPM4.1-8B:
+  template: "minicpm"
+  train_tool: "llamafactory"
+
+# ── Baichuan ──────────────────────────────────────────────────────────────────
+PaddleNLP/Baichuan2-13B-Base:
+  template: "baichuan2"
+  train_tool: "llamafactory"
+
+# ── ByteDance ─────────────────────────────────────────────────────────────────
+ModelHunter/Stable-DiffCoder-8B-Instruct:
+  template: "qwen"
+  train_tool: "llamafactory"
+
+# ── ERNIE (PaddleFormers) ────────────────────────────────────────────────────
+PaddlePaddle/ERNIE-4.5-21B-A3B-PT:
+  template: "ernie_nothink"
+  train_tool: "paddleformers"
+  note: "预训练权重；推荐用于 SFT，效果通常更好"
+
+PaddlePaddle/ERNIE-4.5-21B-A3B-Paddle:
+  template: "ernie_nothink"
+  train_tool: "paddleformers"
+  note: "指令微调权重；已有对话能力，适合补领域知识"
+
+PaddlePaddle/ERNIE-4.5-21B-A3B-Base-PT:
+  template: "ernie_nothink"
+  train_tool: "paddleformers"
+  note: "Base 预训练权重；适合实验"
+
+PaddlePaddle/ERNIE-4.5-21B-A3B-Base-Paddle:
+  template: "ernie_nothink"
+  train_tool: "paddleformers"
+  note: "Base 指令微调权重；适合 Base + 指令微调组合"
+
+PaddlePaddle/ERNIE-4.5-0.3B-PT:
+  template: "ernie_nothink"
+  train_tool: "paddleformers"
+  note: "预训练权重；推荐用于 SFT，效果通常更好"
+
+PaddlePaddle/ERNIE-4.5-0.3B-Paddle:
+  template: "ernie_nothink"
+  train_tool: "paddleformers"
+  note: "指令微调权重；已有对话能力，适合补领域知识"
+
+PaddlePaddle/ERNIE-4.5-0.3B-Base-PT:
+  template: "ernie_nothink"
+  train_tool: "paddleformers"
+  note: "Base 预训练权重；适合实验"
+
+PaddlePaddle/ERNIE-4.5-0.3B-Base-Paddle:
+  template: "ernie_nothink"
+  train_tool: "paddleformers"
+  note: "Base 指令微调权重；适合 Base + 指令微调组合"
