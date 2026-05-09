@@ -1,4 +1,4 @@
-# no-code-train — AI Studio 无代码大模型训练 Skill
+# CLI Trainer Skill — AI Studio 无代码大模型训练 Skill
 
 > 一句话触发，全程引导，不需要写一行训练代码，在 AI Studio 云端完成大模型微调。
 
