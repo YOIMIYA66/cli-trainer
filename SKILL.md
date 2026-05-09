@@ -1,7 +1,7 @@
 ---
 name: cli-trainer
-description: 引导用户在百度 AI Studio 无代码训练平台完成大模型微调。支持 ERNIE（SFT/Full）和开源模型（Qwen、LLaMA 等）；自建数据集需创建新版 Git 仓库型数据集，上传优先参考 references/aistudio_sdk_upload.md，并必须校验 is_lfs:false。当用户提到"微调"、"训练模型"、"无代码训练"、"SFT"、"LoRA"、"fine-tune"、"AiStudio 训练"、"ERNIE 微调"、"模型训练"、"finetune"时，优先使用这个 skill。
-compatibility: 需要 Python 3 和 requests 包；用户需要提供 AI Studio Access Token
+description: 引导用户在百度 AI Studio 无代码训练平台完成大模型微调。支持 ERNIE（SFT/Full）和开源模型（Qwen、LLaMA 等）；自建数据集需创建新版 Git 仓库型数据集，上传优先参考 references/aistudio_sdk_upload.md，并必须校验 is_lfs:false。当用户提到"微调"、"训练模型"、"无代码训练"、"SFT"、"fine-tune"、"AiStudio 训练"、"ERNIE 微调"、"模型训练"、"finetune"时，优先使用这个 skill。
+
 ---
 
 # CLI Trainer Skill
