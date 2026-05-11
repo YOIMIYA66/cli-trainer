@@ -310,13 +310,13 @@ python3 "$SKILL_PATH/scripts/train.py" --logs JOB_ID --system  # 单独查 syste
 
 - `--logs` 查 stdout 是最可靠的 loss 监控方式，ERNIE/LlamaFactory 都支持
 - `--diagnose` 是异常排查首选，会主动拉 system log；用于 `waiting_data` 超时、`failed`、`cancelled`、平台挂载/调度问题
-- `--train-summary` 会从日志解析 loss/lr 并输出 ASCII 折线图，训练完成后依然有效
+- `--train-summary` 会从日志解析 loss/lr 并输出训练趋势，训练完成后依然有效
 - Tensorboard 仅训练中（running 阶段）有效，训练结束后数据流关闭，不再展示
 - `--poll` 会阻塞终端；如果 `waiting_data` 持续超过 10 分钟，脚本会主动拉一次 system log；如果对话不能长期占用终端，就改为周期性运行 `--status`、`--diagnose`、`--logs`、`--train-summary`
 
 ### 训练完成后
 
-运行 `--train-summary` 获取 loss/lr 汇报和 ASCII 折线图，再用 `--eval-guide` 生成测试问题建议，通过 API 调用模型测效果：
+运行 `--train-summary` 获取 loss/lr 汇报，再用 `--eval-guide` 生成测试问题建议，通过 API 调用模型测效果：
 ```bash
 python3 "$SKILL_PATH/scripts/train.py" --train-summary 训练任务ID
 python3 "$SKILL_PATH/scripts/train.py" --eval-guide 训练数据.jsonl
