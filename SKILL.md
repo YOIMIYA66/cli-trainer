@@ -230,31 +230,32 @@ python3 "$SKILL_PATH/scripts/train.py" --suggest-params 数据文件.jsonl --mod
 | `logging_steps` | int | 5 | 每几步打一次日志 |
 | `bf16` | bool | true | 混合精度，节省显存 |
 
-**LlamaFactory（开源模型）主要参数：**
+**LlamaFactory（开源模型）核心训练参数：**
 
-默认使用 `SFT/Full`。只有用户明确选择 `SFT/LoRA` 时，才展示和提交 LoRA 专属参数。
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `learning_rate` | float | `5e-5` | 建议范围 `1e-6`~`5e-4`，小模型（0.5B-3B）推荐 `5e-5`，大模型（7B+）推荐 `1e-5`~`3e-5` |
+| `num_train_epochs` | float | `3.0` | 训练轮次，数据量小可适当增大 |
+| `per_device_train_batch_size` | int | `2` | 单卡 batch size，0.5B 可用 `2`~`8`，7B+ 建议 `1`~`2` |
+| `gradient_accumulation_steps` | int | `8` | 梯度累积步数，等效 batch = `batch_size × accumulation` |
+| `cutoff_len` | int | `1024` | 最大序列长度，长文本场景可调至 `2048`/`4096`，显存随之增大 |
+| `warmup_ratio` | float | `0.1` | 学习率预热比例，建议 `0.05`~`0.1` |
+| `lr_scheduler_type` | string | `"cosine"` | 学习率调度策略：`cosine`、`linear`、`constant` |
+| `max_grad_norm` | float | `1.0` | 梯度裁剪阈值，防止梯度爆炸 |
+| `logging_steps` | int | `5` | 日志打印间隔 |
+| `save_steps` | int | `50` | checkpoint 保存间隔 |
+| `fp16` | bool | `true` | 混合精度 |
 
-| 参数 | 类型 | 推荐值 | 说明 |
-|------|------|-------|------|
-| `num_train_epochs` | float | 3 | 训练轮数 |
-| `per_device_train_batch_size` | int | 4 | 批大小 |
-| `learning_rate` | float | 5e-5 | Full 微调学习率应比 LoRA 更小，避免破坏底座能力 |
-| `cutoff_len` | int | 512 | 最大序列长度 |
-| `warmup_ratio` | float | 0.03 | 学习率预热比例 |
-| `logging_steps` | int | 5 | 日志间隔 |
-| `save_steps` | int | 500 | checkpoint 保存间隔 |
-| `fp16` | bool | true | 混合精度 |
+**LlamaFactory（SFT/LoRA、DPO、KTO 时生效）LoRA 参数：**
 
-**LlamaFactory（SFT/LoRA 时才使用）额外参数：**
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `lora_rank` | int | `8` | LoRA 秩，越大表达能力越强但显存越多，常用 `8`/`16`/`32`/`64` |
+| `lora_alpha` | int | `16` | 缩放系数，通常设为 `lora_rank` 的 1~2 倍 |
+| `lora_dropout` | float | `0` | 防过拟合可设 `0.05`~`0.1` |
+| `lora_target` | string | `"all"` | 应用 LoRA 的目标模块，`all` 表示所有线性层 |
 
-| 参数 | 类型 | 推荐值 | 说明 |
-|------|------|-------|------|
-| `learning_rate` | float | 2e-4 | LoRA 学习率通常比 Full 大 |
-| `lora_rank` | int | 8 | rank 越大能力越强但显存更多 |
-| `lora_alpha` | int | 16 | 一般设为 lora_rank 的 2 倍 |
-| `lora_dropout` | float | 0.05 | 防止小数据集过拟合 |
-
-如果采用默认 `SFT/Full`，从 `--suggest-params` 结果中删除 `lora_rank`、`lora_alpha`、`lora_dropout`，并把 `learning_rate` 调整到 Full 微调适用范围（通常 `5e-5` 起步；数据较小或底座能力需要保守保护时可更低）。如果用户选择 `SFT/LoRA`，才保留 LoRA 字段和较高学习率。只要训练方式发生变化，必须重新展示调整后的完整参数给用户确认。
+训练方式选定后，按以下原则提交参数：`SFT/Full` 只传核心训练参数，不传 LoRA 参数；`SFT/LoRA`/`DPO`/`KTO` 在核心训练参数基础上叠加 LoRA 参数。只要训练方式发生变化，必须重新展示调整后的完整参数给用户确认。
 
 上下文长度要跟目标回答风格联动：短问答/分类/固定格式可用脚本推荐的 `cutoff_len`/`max_seq_len`；如果用户希望模型学习更完整的长解释、长评论或保留热搜详情，优先建议 512。调大长度会增加训练时间和显存占用；出现 OOM 时，先把 `per_device_train_batch_size` 降到 2，再考虑降长度。
 
