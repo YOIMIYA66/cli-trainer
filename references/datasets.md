@@ -38,20 +38,3 @@
 | [`lmtyyz/Multilingual-Thinking`](https://aistudio.baidu.com/dataset/detail/380414) | 2 MB | 多语言推理链数据 | 小体量，快速上手验证流程 |
 | [`lmtyyz/Nemotron-SFT-Safety-v1`](https://aistudio.baidu.com/dataset/detail/380416) | 77 MB | 安全对齐 SFT 数据 | 增强安全拒绝和对齐能力 |
 | [`lmtyyz/Bespoke-Stratos-17s`](https://aistudio.baidu.com/dataset/detail/380413) | 288 MB | Bespoke-Stratos 推理数据 | 大体量，提升推理和思维链能力 |
-
----
-
-## 场景推荐速查
-
-| 用户目标 | 推荐数据集 | 框架 |
-|---------|-----------|------|
-| 不知道从哪开始、先跑通流程 | `lmtyyz/self-cognition`（23 KB）| LlamaFactory |
-| 通用中文能力 | `lmtyyz/alpaca-gpt4-data-zh` | LlamaFactory |
-| 通用英文能力 | `lmtyyz/alpaca-gpt4-data-en` 或 `lmtyyz/WizardLM-evol-instruct-V2` | LlamaFactory |
-| 数学 / 推理 | `lmtyyz/school-math-0.25M` | LlamaFactory |
-| 中文多轮对话 | `lmtyyz/ShareGPT-Chinese-zh` | LlamaFactory |
-| Agent / 工具调用 | `lmtyyz/Agent-FLAN` | LlamaFactory |
-| ERNIE 快速体验 | `lmtyyz/Multilingual-Thinking` | PaddleFormers |
-| ERNIE 推理增强 | `lmtyyz/Bespoke-Stratos-17s` | PaddleFormers |
-
-也可运行 `--list-datasets` 直接在命令行查看完整列表。
