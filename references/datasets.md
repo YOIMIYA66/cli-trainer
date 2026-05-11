@@ -5,7 +5,7 @@
 
 ---
 
-## LlamaFactory 格式（开源模型 SFT/LoRA/DPO）
+## LlamaFactory 格式
 
 ### Alpaca 格式（4 个）
 `{"instruction": "...", "input": "...", "output": "..."}`
