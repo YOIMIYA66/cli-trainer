@@ -35,8 +35,7 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data my_data.jsonl
 6. **推荐超参** — 运行 `--suggest-params`，展示结果，**等用户确认后才提交**
 7. **提交训练** — 运行 `--submit`，拿到 jobId
 8. **监控训练** — 提交后运行 `--poll JOB_ID`；任务进入 running 且接口返回 `tensorboardUrl` 后自动打开 Tensorboard
-9. **取结果** — 训练完成后给出模型仓库地址和训练摘要，按平台当前支持的 API 或部署入口验证效果
-10. **效果测试** — 根据训练数据生成测试问题，区分训练集记忆、同类泛化和基础能力回归
+9. **取结果** — 训练完成后给出模型仓库地址和训练摘要
 
 ---
 
@@ -317,13 +316,10 @@ python3 "$SKILL_PATH/scripts/train.py" --logs JOB_ID --system  # 单独查 syste
 
 ### 训练完成后
 
-运行 `--train-summary` 获取 loss/lr 汇报，再用 `--eval-guide` 生成测试问题建议，通过 API 调用模型测效果：
+运行 `--train-summary` 获取 loss/lr 汇报：
 ```bash
 python3 "$SKILL_PATH/scripts/train.py" --train-summary 训练任务ID
-python3 "$SKILL_PATH/scripts/train.py" --eval-guide 训练数据.jsonl
 ```
-
-先测训练集内的问题，再测训练集外同类问题，对比泛化能力。
 
 ### LoRA 产物可用性确认
 
@@ -402,7 +398,6 @@ python3 "$SKILL_PATH/scripts/train.py" --cancel JOB_ID  # 取消卡住的任务
 --train-summary <job_id>         训练完成后汇报 loss/lr 趋势和健康状态
 --poll <job_id>                 持续轮询（阻塞终端，对话场景不推荐）
 --cancel <job_id>               取消任务
---eval-guide <file>             生成测试问题和判断标准
 
 --api-key TOKEN / --env-file FILE / --base-url URL
 ```

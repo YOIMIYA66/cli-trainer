@@ -14,7 +14,6 @@
   train.py --logs <job_id> [--system]            查看日志
   train.py --diagnose <job_id>                   主动诊断状态、system log 和 stdout
   train.py --cancel <job_id>                     取消任务
-  train.py --eval-guide <file>                   根据训练数据生成测试问题
 """
 
 from __future__ import annotations
@@ -1633,7 +1632,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--diagnose", metavar="JOB_ID", help="主动诊断任务状态、system log 和 stdout")
     p.add_argument("--cancel", metavar="JOB_ID", help="取消任务")
     p.add_argument("--open-tb", metavar="JOB_ID", help="任务 running 后打开 Tensorboard")
-    p.add_argument("--eval-guide", metavar="FILE", help="根据训练数据生成测试问题")
     p.add_argument("--train-summary", metavar="JOB_ID", help="训练完成后汇报 loss/lr 趋势")
 
     # submit 参数
@@ -1692,8 +1690,6 @@ def main() -> None:
         cmd_cancel(args)
     elif args.open_tb:
         cmd_open_tb(args)
-    elif args.eval_guide:
-        cmd_eval_guide(args)
     elif args.train_summary:
         cmd_train_summary(args)
     else:
