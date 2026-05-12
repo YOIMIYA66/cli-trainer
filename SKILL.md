@@ -20,7 +20,7 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data my_data.jsonl
 
 1. **禁止自己猜测或硬写超参数然后提交。** 必须先运行 `--suggest-params`，把推荐值展示给用户，等用户确认再提交。
 2. **禁止在用户明确确认前调用 `--submit`。** 展示参数时逐行解释含义，问”需要调整哪些？没问题就提交”，等用户回复。
-3. **禁止把 LoRA 推荐参数当作默认训练配置。** 训练方式默认 `SFT/Full`；除非用户明确要求 `SFT/LoRA`，否则不要传 `--train-type`，也不要提交 `lora_rank`、`lora_alpha`、`lora_dropout` 等 LoRA 专属参数。`--suggest-params --model-type llama` 的输出可能包含 LoRA 字段，展示给用户前必须按实际 `train_type` 过滤并说明。
+3. **禁止把推荐参数当作默认训练配置直接提交。** 训练方式默认 `SFT/Full`；除非用户明确要求 `SFT/LoRA`，否则不要传 `--train-type`，也不要提交 `lora_rank`、`lora_alpha`、`lora_dropout` 等 LoRA 专属参数。`--suggest-params --model-type llama` 的输出可能包含 LoRA 字段，展示给用户前必须按实际 `train_type` 过滤并说明。
 4. **训练方式变化时必须同步调整超参数。** 从 `SFT/LoRA` 改为 `SFT/Full` 时，必须删除 LoRA 专属参数，并把学习率降到 Full 微调适用范围（通常 `5e-5` 起步，必要时更低）；从 `SFT/Full` 改为 `SFT/LoRA` 时，才可恢复 LoRA 字段和较高学习率。用户提出”学更完整长解释/长回答/保留更多上下文”时，提醒可把 `cutoff_len`/`max_seq_len` 提到 512 或更高，同时说明训练会更慢、更吃显存，OOM 时先降 `per_device_train_batch_size`。
 
 ---
