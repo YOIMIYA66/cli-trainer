@@ -4,15 +4,12 @@
 用法：
   train.py --verify-token                         验证 Access Token
   train.py --check-data <file>                   检查数据格式
-  train.py --verify-upload --train-data REPO_ID --train-file F [--local-file FILE]
-                                                验证数据集上传结果并打印回执
   train.py --suggest-params <file> [--model-type ernie|llama]  推荐超参
-  train.py --submit --base-model M --train-data REPO_ID [--train-file F] [--train-type T] [--params JSON]
+  train.py --submit --base-model M --train-type T --train-data D/N --train-file F [--params JSON]
   train.py --status <job_id>                     查看任务状态
-  train.py --poll <job_id> [--interval N]        持续轮询（running 后自动打开 Tensorboard）
-  train.py --open-tb <job_id>                    running 后打开 Tensorboard
+  train.py --poll <job_id> [--interval N]        持续轮询（训练开始后自动打开 Tensorboard）
+  train.py --open-tb <job_id>                    打开 Tensorboard 看板
   train.py --logs <job_id> [--system]            查看日志
-  train.py --diagnose <job_id>                   主动诊断状态、system log 和 stdout
   train.py --cancel <job_id>                     取消任务
   train.py --eval-guide <file>                   根据训练数据生成测试问题
 """
@@ -28,16 +25,9 @@ import random
 import re
 import sys
 import time
-import warnings
 import webbrowser
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
-
-warnings.filterwarnings(
-    "ignore",
-    message=r"urllib3 v2 only supports OpenSSL 1\.1\.1\+.*",
-)
 
 try:
     import requests
@@ -46,10 +36,8 @@ except ImportError:
     sys.exit(1)
 
 BASE_URL = "https://train.aistudio-app.com"
-GIT_BASE_URL = "https://git.aistudio.baidu.com"
 TOKEN_ENV_VARS = ("AISTUDIO_ACCESS_TOKEN", "AISTUDIO_API_KEY")
 WHITELIST_PATH = Path(__file__).parent.parent / "references" / "model_whitelist.yaml"
-AISTUDIO_CLI_TOKEN_PATH = Path.home() / ".cache" / "aistudio" / ".auth" / "token"
 
 # --------------------------- whitelist ---------------------------- #
 
@@ -78,9 +66,9 @@ def _whitelist_tool(model: str) -> str:
 
 # ---------------------------- auth ---------------------------- #
 
-def resolve_token(args: argparse.Namespace) -> tuple[str, str]:
+def load_token(args: argparse.Namespace) -> str:
     if args.api_key:
-        return args.api_key.strip(), "--api-key"
+        return args.api_key.strip()
 
     if args.env_file:
         p = Path(args.env_file)
@@ -92,33 +80,22 @@ def resolve_token(args: argparse.Namespace) -> tuple[str, str]:
                 continue
             k, _, v = line.partition("=")
             if k.strip() in TOKEN_ENV_VARS and v.strip():
-                return v.strip().strip('"').strip("'"), f"--env-file {p}"
+                return v.strip().strip('"').strip("'")
         die(f"env 文件中未找到 AISTUDIO_ACCESS_TOKEN 或 AISTUDIO_API_KEY")
 
     for var in TOKEN_ENV_VARS:
         val = os.environ.get(var, "").strip()
         if val:
-            return val, f"环境变量 {var}"
-
-    if AISTUDIO_CLI_TOKEN_PATH.exists():
-        val = AISTUDIO_CLI_TOKEN_PATH.read_text(encoding="utf-8", errors="replace").strip()
-        if val:
-            return val, f"AI Studio SDK 缓存 {AISTUDIO_CLI_TOKEN_PATH}"
+            return val
 
     die(
         "未找到 Access Token。请通过以下任一方式提供：\n"
         "  export AISTUDIO_ACCESS_TOKEN='your_token'\n"
         "  --api-key 'your_token'\n"
         "  --env-file .aistudio.env\n\n"
-        "如果已经用 aistudio config/login 配过，本脚本也会自动读取：\n"
-        f"  {AISTUDIO_CLI_TOKEN_PATH}\n\n"
         "获取地址：https://aistudio.baidu.com/account/accessToken"
     )
-    return "", ""  # unreachable; die() raises SystemExit
-
-
-def load_token(args: argparse.Namespace) -> str:
-    return resolve_token(args)[0]
+    return ""  # unreachable; die() raises SystemExit
 
 
 def headers(token: str) -> dict:
@@ -151,68 +128,9 @@ def api(method: str, path: str, token: str, base_url: str, **kwargs) -> dict:
 
     if body.get("code") != 0:
         msg = body.get("msg", "未知错误")
-        die(_format_api_error(body.get("code"), msg))
+        die(f"API 错误（code={body.get('code')}）：{msg}")
 
     return body.get("data") or {}
-
-
-def git_contents(repo_id: str, file_path: str, token: str, ref: str = "master") -> dict:
-    repo = quote(repo_id.strip().strip("/"), safe="/")
-    path = quote(file_path.strip().strip("/"), safe="/")
-    url = f"{GIT_BASE_URL}/api/v1/repos/{repo}/contents/{path}"
-    try:
-        resp = requests.get(
-            url,
-            headers={"Authorization": f"token {token}"},
-            params={"ref": ref},
-            timeout=30,
-        )
-    except requests.exceptions.ConnectionError:
-        die(f"无法连接到 {GIT_BASE_URL}，请检查网络")
-        return {}
-    except requests.exceptions.Timeout:
-        die("请求 Git 仓库内容 API 超时，请稍后重试")
-        return {}
-
-    if resp.status_code == 401:
-        die("Git 仓库 API 认证失败（401）。请确认 Access Token 是否正确，或重新运行 aistudio config。")
-    if resp.status_code == 404:
-        die(
-            f"未在数据集仓库找到训练文件：{repo_id}/{file_path}\n"
-            "请确认 repo_id 来自数据集详情页，且 --train-file 与仓库内文件名完全一致。"
-        )
-
-    try:
-        body = resp.json()
-    except Exception:
-        die(f"Git 仓库 API 返回了非 JSON 响应（HTTP {resp.status_code}）：\n{resp.text[:300]}")
-        return {}
-
-    if resp.status_code >= 400:
-        msg = body.get("message") or body.get("msg") or resp.text[:300]
-        die(f"Git 仓库 API 错误（HTTP {resp.status_code}）：{msg}")
-
-    return body
-
-
-def _format_api_error(code: Any, msg: str) -> str:
-    text = str(msg)
-    lower = text.lower()
-    permission_words = ("permission", "forbidden", "unauthorized", "access denied")
-    dataset_words = ("dataset", "trainData", "数据集", "权限", "无权", "访问")
-
-    if any(word in lower for word in permission_words) or any(word in text for word in dataset_words):
-        return (
-            f"API 错误（code={code}）：{msg}\n\n"
-            "如果这里是在提交训练任务时访问数据集失败，优先检查数据集仓库和上传结果：\n"
-            "  - 自建数据集先在 AiStudio 网页创建或确认数据集仓库，拿到真实 repo_id；\n"
-            "  - `repo_id` 必须形如 gitlogin/repo_name，gitlogin 不能用昵称、展示名或邮箱猜；\n"
-            "  - 用 `aistudio upload ... --repo-type dataset` 上传到已有仓库后，确认训练文件存在且 is_lfs=false。\n"
-            "若系统日志反复停在 waiting_data，先核对 `--train-file`、is_lfs、文件大小和下载回验；"
-            "这些都正常时，更可能是平台内部的数据集挂载任务（mount job）卡住，保留 jobId 给平台排查。"
-        )
-
-    return f"API 错误（code={code}）：{msg}"
 
 
 def die(msg: str) -> None:
@@ -248,21 +166,25 @@ def cmd_list_models(_args: argparse.Namespace) -> None:  # noqa: ARG001
 """)
 
     print("  【文心 ERNIE】  trainType: SFT/Full  数据格式: src/tgt JSONL")
+    variant_note = {
+        "-PT":          "预训练权重（推荐用于微调）",
+        "-Paddle":      "指令微调权重（已有对话能力）",
+        "-Base-PT":     "Base 预训练权重",
+        "-Base-Paddle": "Base 指令微调权重",
+    }
+    sorted_variants = sorted(variant_note.items(), key=lambda x: -len(x[0]))
     for m in paddle:
-        meta = wl.get(m, {})
-        note = meta.get("note", "")
+        note = next((v for k, v in sorted_variants if m.endswith(k)), "")
         print(f"    {m:<48} {note}")
 
-    print(f"\n  【开源模型】  trainType: SFT/Full / SFT/LoRA / DPO / KTO  数据格式: Alpaca 或 ShareGPT JSONL/JSON")
+    print(f"\n  【开源模型】  trainType: SFT/LoRA  数据格式: Alpaca / ShareGPT JSONL")
     for m in llama:
-        meta = wl.get(m, {})
         family = m.split("/")[-1].split("-")[0] if "/" in m else m
-        note = meta.get("note", family)
-        print(f"    {m:<48} {note}")
+        print(f"    {m:<48} {family}")
 
     print(f"\n{sep}")
     print("  使用示例：")
-    print("    --base-model 'PaddlePaddle/ERNIE-4.5-0.3B-PT'   # 默认 SFT/Full")
+    print("    --base-model 'PaddlePaddle/ERNIE-4.5-0.3B-PT' --train-type 'SFT/Full'")
     print("    --base-model 'ModelHub/Qwen2.5-7B-Instruct'   --train-type 'SFT/LoRA'")
     print(f"{sep}\n")
 
@@ -369,15 +291,16 @@ def cmd_list_datasets(_args: argparse.Namespace) -> None:
         print(f"    {path_w} {ds['size']:>8}  {ds['desc']}  [{ds['note']}]")
 
     print()
-    print("  【开源模型专用】  格式：Alpaca 或 ShareGPT JSONL/JSON  trainType: SFT/Full / SFT/LoRA / DPO / KTO")
+    print("  【开源模型专用】  格式：Alpaca / ShareGPT JSONL  trainType: SFT/LoRA")
     for ds in _BUILTIN_DATASETS["llama"]:
         path_w = f"{ds['path']:<42}"
         print(f"    {path_w} {ds['size']:>8}  {ds['desc']}  [{ds['note']}]")
 
     print(f"\n{sep}")
-    print("  使用示例（ERNIE + Multilingual-Thinking 数据集）：")
+    print("  使用示例（ERNIE + lima 数据集）：")
     print("    python3 train.py --submit \\")
     print("      --base-model 'PaddlePaddle/ERNIE-4.5-0.3B-PT' \\")
+    print("      --train-type 'SFT/Full' \\")
     print("      --train-data 'lmtyyz/Multilingual-Thinking' \\")
     print("      --train-file 'train.jsonl' \\")
     print("      --params '{\"num_train_epochs\": 1, \"max_steps\": 200}'")
@@ -395,9 +318,8 @@ def cmd_list_datasets(_args: argparse.Namespace) -> None:
 # -------------------------- verify token ---------------------- #
 
 def cmd_verify_token(args: argparse.Namespace) -> None:
-    token, source = resolve_token(args)
+    token = load_token(args)
     print("正在验证 Access Token ...")
-    print(f"Token 来源：{source}")
     # 用一个无副作用的 GET 端点验证（非 200→401 表示 token 无效）
     url = args.base_url.rstrip("/") + "/v1/train/jobs/__verify_probe__/progress"
     resp: requests.Response
@@ -409,8 +331,6 @@ def cmd_verify_token(args: argparse.Namespace) -> None:
 
     if resp.status_code == 401:
         print("Token 无效或已过期。")
-        if source.startswith("环境变量") and AISTUDIO_CLI_TOKEN_PATH.exists():
-            print("提示：当前环境变量会覆盖 AI Studio SDK 缓存；若缓存 token 才是新 token，请先 unset AISTUDIO_ACCESS_TOKEN/AISTUDIO_API_KEY，或显式传 --api-key。")
         print("请重新获取：https://aistudio.baidu.com/account/accessToken")
         sys.exit(1)
 
@@ -419,111 +339,20 @@ def cmd_verify_token(args: argparse.Namespace) -> None:
 
 # -------------------------- check data ------------------------ #
 
-def _is_sharegpt_obj(obj: dict) -> bool:
-    return isinstance(obj.get("conversations"), list) or isinstance(obj.get("messages"), list)
-
-
-def _validate_sharegpt_obj(obj: dict) -> str:
-    messages = obj.get("conversations")
-    role_key = "from"
-    content_key = "value"
-    user_roles = {"human", "user"}
-    assistant_roles = {"gpt", "assistant"}
-
-    if messages is None:
-        messages = obj.get("messages")
-        role_key = "role"
-        content_key = "content"
-        user_roles = {"user"}
-        assistant_roles = {"assistant"}
-
-    if not isinstance(messages, list) or not messages:
-        return "ShareGPT 格式错误：conversations/messages 必须是非空列表"
-
-    has_user = False
-    has_assistant = False
-    for i, msg in enumerate(messages, start=1):
-        if not isinstance(msg, dict):
-            return f"ShareGPT 格式错误：第 {i} 条消息必须是对象"
-        role = msg.get(role_key)
-        content = msg.get(content_key)
-        if not isinstance(role, str) or not role:
-            return f"ShareGPT 格式错误：第 {i} 条消息缺少 {role_key}"
-        if not isinstance(content, str) or not content:
-            return f"ShareGPT 格式错误：第 {i} 条消息缺少 {content_key}"
-        if role in user_roles:
-            has_user = True
-        if role in assistant_roles:
-            has_assistant = True
-
-    # 偏好数据可以把回答放在 chosen/rejected 中，conversations 里不一定已有 assistant。
-    has_preference_response = isinstance(obj.get("chosen"), (dict, str)) and isinstance(obj.get("rejected"), (dict, str))
-    if not has_user:
-        return "ShareGPT 格式错误：至少需要一条 human/user 消息"
-    if not has_assistant and not has_preference_response:
-        return "ShareGPT 格式错误：SFT 至少需要一条 gpt/assistant 回复"
-    return ""
-
-
-def detect_format_obj(obj: object) -> str:
-    """返回 'ernie' | 'alpaca' | 'sharegpt' | 'unknown'"""
-    if isinstance(obj, dict):
-        if "src" in obj and "tgt" in obj:
-            return "ernie"
-        if ("instruction" in obj or "input" in obj) and ("output" in obj or ("chosen" in obj and "rejected" in obj)):
-            return "alpaca"
-        if _is_sharegpt_obj(obj):
-            return "sharegpt"
-    return "unknown"
-
-
 def detect_format(line: str) -> str:
-    """兼容旧调用：从一行 JSON 字符串检测格式。"""
+    """返回 'ernie' | 'alpaca' | 'sharegpt' | 'unknown'"""
     try:
         obj = json.loads(line)
     except json.JSONDecodeError:
         return "invalid_json"
-    return detect_format_obj(obj)
-
-
-def _load_data_records(path: Path) -> tuple[list[tuple[int, dict, str]], list[tuple[int, str, str]], str, int]:
-    """读取 JSONL 或 JSON 数组，返回 (records, errors, kind, total_units)。"""
-    text = path.read_text(encoding="utf-8", errors="replace")
-    stripped = text.strip()
-    if not stripped:
-        return [], [], "empty", 0
-
-    records: list[tuple[int, dict, str]] = []
-    errors: list[tuple[int, str, str]] = []
-
-    if stripped.startswith("["):
-        try:
-            data = json.loads(stripped)
-        except json.JSONDecodeError as e:
-            return [], [(1, stripped[:80], f"JSON 数组解析失败：{e}")], "json_array", 0
-        if not isinstance(data, list):
-            return [], [(1, stripped[:80], "JSON 顶层必须是数组或 JSONL 行")], "json_array", 0
-        for idx, item in enumerate(data, start=1):
-            preview = json.dumps(item, ensure_ascii=False)[:120]
-            if isinstance(item, dict):
-                records.append((idx, item, preview))
-            else:
-                errors.append((idx, preview, "JSON 数组元素必须是对象"))
-        return records, errors, "json_array", len(data)
-
-    lines = text.splitlines()
-    non_empty = [(i + 1, l) for i, l in enumerate(lines) if l.strip()]
-    for lineno, raw in non_empty:
-        try:
-            obj = json.loads(raw)
-        except json.JSONDecodeError:
-            errors.append((lineno, raw[:80], "JSON 解析失败"))
-            continue
-        if isinstance(obj, dict):
-            records.append((lineno, obj, raw[:120]))
-        else:
-            errors.append((lineno, raw[:80], "每行必须是 JSON 对象"))
-    return records, errors, "jsonl", len(non_empty)
+    if isinstance(obj, dict):
+        if "src" in obj and "tgt" in obj:
+            return "ernie"
+        if "instruction" in obj or ("input" in obj and "output" in obj):
+            return "alpaca"
+        if "conversations" in obj and isinstance(obj["conversations"], list):
+            return "sharegpt"
+    return "unknown"
 
 
 def cmd_check_data(args: argparse.Namespace) -> None:
@@ -532,34 +361,36 @@ def cmd_check_data(args: argparse.Namespace) -> None:
         die(f"文件不存在：{path}")
 
     print(f"正在检查：{path}")
-    records, errors, data_kind, total_units = _load_data_records(path)
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    total = len(lines)
 
-    if data_kind == "empty":
+    # 过滤空行
+    non_empty = [(i + 1, l) for i, l in enumerate(lines) if l.strip()]
+
+    if not non_empty:
         die("文件为空，没有可用数据。")
 
     # 检测格式
     format_counts: dict[str, int] = {}
+    errors: list[tuple[int, str, str]] = []
 
-    for lineno, obj, preview in records:
-        fmt = detect_format_obj(obj)
+    for lineno, raw in non_empty:
+        fmt = detect_format(raw)
         format_counts[fmt] = format_counts.get(fmt, 0) + 1
         if fmt in ("invalid_json", "unknown"):
-            errors.append((lineno, preview[:80], "字段不符合 ERNIE、Alpaca 或 ShareGPT 格式"))
+            reason = "JSON 解析失败" if fmt == "invalid_json" else "字段不符合 ERNIE 或 Alpaca 格式"
+            errors.append((lineno, raw[:80], reason))
         elif fmt == "ernie":
             # 额外校验：src/tgt 必须是 list，不能是裸字符串
+            obj = json.loads(raw)  # 已在 detect_format 中解析成功，不会抛异常
             if not isinstance(obj.get("src"), list) or not isinstance(obj.get("tgt"), list):
-                errors.append((lineno, preview[:80], 'ERNIE 格式错误：src/tgt 必须是列表 ["..."]，不能是裸字符串'))
-        elif fmt == "sharegpt":
-            reason = _validate_sharegpt_obj(obj)
-            if reason:
-                errors.append((lineno, preview[:80], reason))
+                errors.append((lineno, raw[:80], 'ERNIE 格式错误：src/tgt 必须是列表 ["..."]，不能是裸字符串'))
 
-    detected = max(format_counts.keys(), key=lambda k: format_counts[k]) if format_counts else "invalid_json"
+    detected = max(format_counts.keys(), key=lambda k: format_counts[k])
 
     print(f"\n{chr(45) * 50}")
-    kind_label = "JSON 数组" if data_kind == "json_array" else "JSONL"
-    print(f"  文件容器：        {kind_label}")
-    print(f"  记录数：          {total_units}")
+    print(f"  总行数（含空行）：{total}")
+    print(f"  非空行数：        {len(non_empty)}")
     print(f"  检测到格式：      {_fmt_label(detected)}")
 
     if errors:
@@ -572,29 +403,23 @@ def cmd_check_data(args: argparse.Namespace) -> None:
         print(f"  格式检查：        全部通过 [OK]")
 
     # 混合格式警告
-    open_formats = [f for f in ("alpaca", "sharegpt") if f in format_counts]
-    if "ernie" in format_counts and open_formats:
-        print("\n  警告：文件中同时包含 ERNIE 格式和开源模型格式，可能混淆了两种数据集！")
-    elif len(open_formats) > 1:
-        print("\n  警告：文件中同时包含 Alpaca 和 ShareGPT 格式，建议统一成一种格式后再训练。")
+    llama_fmts = {"alpaca", "sharegpt"}
+    if "ernie" in format_counts and (format_counts.keys() & llama_fmts):
+        print("\n  警告：文件中同时包含 ERNIE 格式和 Alpaca/ShareGPT 格式，可能混淆了两种数据集！")
+    elif len(format_counts.keys() & llama_fmts) > 1:
+        print("\n  警告：文件中同时包含 Alpaca 格式和 ShareGPT 格式，建议统一为一种格式。")
 
-    # 如果 ERNIE 用户用了 Alpaca 格式，提示转换
+    # 如果 ERNIE 用户用了 Alpaca/ShareGPT 格式，提示转换
     if detected == "alpaca":
         print("""
   提示：如果要训练 ERNIE 模型，需要将格式转换为 ERNIE 格式：
     {"src": ["问题或指令"], "tgt": ["期望回答"]}
 
-  快速转换脚本（Python）：
+  快速转换脚本（Alpaca → ERNIE）：
     import json
-
-    def load_alpaca(path):
-        text = open(path, encoding="utf-8").read().strip()
-        if text.startswith("["):
-            return json.loads(text)
-        return [json.loads(line) for line in text.splitlines() if line.strip()]
-
-    with open("ernie_data.jsonl", "w", encoding="utf-8") as fout:
-        for d in load_alpaca("alpaca_data.json"):
+    with open("input.jsonl") as fin, open("output.jsonl", "w") as fout:
+        for line in fin:
+            d = json.loads(line)
             text = d.get("instruction", "")
             if d.get("input"):
                 text += "\\n" + d["input"]
@@ -602,13 +427,24 @@ def cmd_check_data(args: argparse.Namespace) -> None:
 """)
     elif detected == "sharegpt":
         print("""
-  提示：ShareGPT 是 LlamaFactory 开源模型格式，可以直接用于 Qwen/DeepSeek 等开源模型。
-  如果要训练 ERNIE 模型，需要先转换为 ERNIE 的 src/tgt JSONL。
+  提示：如果要训练 ERNIE 模型，需要将格式转换为 ERNIE 格式：
+    {"src": ["问题或指令"], "tgt": ["期望回答"]}
+
+  快速转换脚本（ShareGPT → ERNIE）：
+    import json
+    with open("input.jsonl") as fin, open("output.jsonl", "w") as fout:
+        for line in fin:
+            d = json.loads(line)
+            convs = d.get("conversations", [])
+            for i in range(0, len(convs) - 1, 2):
+                human = convs[i].get("value", "") if convs[i].get("from") == "human" else ""
+                gpt   = convs[i+1].get("value", "") if convs[i+1].get("from") == "gpt" else ""
+                if human and gpt:
+                    fout.write(json.dumps({"src": [human], "tgt": [gpt]}, ensure_ascii=False) + "\\n")
 """)
 
     # 样本量建议
-    invalid_record_lines = {lineno for lineno, _preview, _reason in errors}
-    n = len([1 for lineno, _obj, _preview in records if lineno not in invalid_record_lines])
+    n = len(non_empty) - len(errors)
     print(f"\n  有效样本数：{n}")
     if n < 50:
         print("  建议：样本量偏少（< 50），仅适合验证流程是否跑通，效果不保证。")
@@ -640,7 +476,7 @@ def _fmt_label(fmt: str) -> str:
     return {
         "ernie": "ERNIE 格式（src/tgt）",
         "alpaca": "Alpaca 格式（instruction/input/output）",
-        "sharegpt": "ShareGPT 格式（conversations/from/value 或 messages/role/content）",
+        "sharegpt": "ShareGPT 格式（conversations）",
         "unknown": "未知格式",
         "invalid_json": "JSON 解析失败",
     }.get(fmt, fmt)
@@ -653,11 +489,18 @@ def cmd_suggest_params(args: argparse.Namespace) -> None:
     if not path.exists():
         die(f"文件不存在：{path}")
 
-    records, _errors, data_kind, _total_units = _load_data_records(path)
-    valid_lines = [json.dumps(obj, ensure_ascii=False) for _idx, obj, _preview in records]
+    lines = [l for l in path.read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()]
+    # 只计有效 JSON 行（与 eval-guide 保持一致）
+    valid_lines = []
+    for l in lines:
+        try:
+            json.loads(l)
+            valid_lines.append(l)
+        except Exception:
+            pass
     n = len(valid_lines)
     if not n:
-        die("文件中没有可解析的有效训练样本，请先用 --check-data 检查数据格式。")
+        die("文件中没有可解析的有效 JSON 行，请先用 --check-data 检查数据格式。")
 
     # 估算平均序列长度（用有效行）
     sample = valid_lines[:min(100, n)]
@@ -668,7 +511,6 @@ def cmd_suggest_params(args: argparse.Namespace) -> None:
 
     print(f"\n{chr(45) * 50}")
     print(f"  数据集：{path.name}")
-    print(f"  文件容器：{'JSON 数组' if data_kind == 'json_array' else 'JSONL'}")
     print(f"  样本数：{n}")
     print(f"  平均字符长度：{avg_len:.0f}  ->  建议 max_seq_len / cutoff_len：{suggested_seq_len}")
     print(f"  模型类型：{model_type}")
@@ -753,6 +595,11 @@ def _print_params(params: dict, note: str, framework: str) -> None:
 def cmd_submit(args: argparse.Namespace) -> None:
     token = load_token(args)
 
+    # 数据集公开提醒（私有数据集提交时直接报 code=10004）
+    print("⚠️  提交前请确认：数据集仓库必须设为【公开】，否则提交时会报权限错误。")
+    print(f"   CLI 上传示例：aistudio dataset create -n 数据集名 -f 文件.jsonl -p  （-p 不能省）")
+    print()
+
     # 白名单校验
     tool = _whitelist_tool(args.base_model)
     if not tool:
@@ -764,7 +611,7 @@ def cmd_submit(args: argparse.Namespace) -> None:
                 f"  python3 {Path(__file__).name} --list-models"
             )
     # 框架与 trainType 一致性检查
-    VALID_TRAIN_TYPES = {"SFT/Full", "SFT/LoRA", "DPO", "KTO", "Post-PreTrain"}
+    VALID_TRAIN_TYPES = {"SFT/Full", "SFT/LoRA", "Post-PreTrain"}
     if args.train_type not in VALID_TRAIN_TYPES:
         # 尝试大小写纠正
         normalized = next((t for t in VALID_TRAIN_TYPES if t.lower() == args.train_type.lower()), None)
@@ -779,9 +626,10 @@ def cmd_submit(args: argparse.Namespace) -> None:
             f"请改为：--train-type 'SFT/Full'"
         )
     if tool == "llamafactory" and args.train_type == "SFT/Full":
-        print("提示：开源模型全量微调（SFT/Full）显存消耗较大。")
-        print()
-
+        die(
+            f"开源模型使用 LlamaFactory，trainType 应为 SFT/LoRA，\n"
+            f"不支持 SFT/Full。请改为：--train-type 'SFT/LoRA'"
+        )
 
     # 构建请求体
     payload: dict[str, Any] = {
@@ -817,7 +665,7 @@ def cmd_submit(args: argparse.Namespace) -> None:
     # 可视化参数（report_to/visualdl）由平台后端自动注入，用户无需传也不能传
 
     if hp:
-        _validate_hyperparams(hp, args.train_type, tool)
+        _validate_hyperparams(hp, args.train_type)
         payload["hyperparameters"] = hp
 
     print(f"\n提交训练任务：")
@@ -855,7 +703,7 @@ _LLAMAFACTORY_UNSUPPORTED = {"max_steps", "max_seq_len", "bf16", "warmup_steps"}
 _PADDLEFORMERS_UNSUPPORTED = {"cutoff_len", "lora_rank", "lora_alpha", "lora_dropout", "warmup_ratio", "fp16"}
 
 
-def _validate_hyperparams(hp: dict, train_type: str, tool: str | None = None) -> None:
+def _validate_hyperparams(hp: dict, train_type: str) -> None:
     errors = []
     for k, v in hp.items():
         if isinstance(v, str) and k not in _STRING_PARAMS:
@@ -863,8 +711,8 @@ def _validate_hyperparams(hp: dict, train_type: str, tool: str | None = None) ->
     if errors:
         die("超参数类型错误，请去掉值的引号：\n" + "\n".join(errors))
 
-    is_llama = tool == "llamafactory" or train_type in ("SFT/LoRA", "DPO", "KTO")
-    is_paddle = tool == "paddleformers"
+    is_llama = train_type == "SFT/LoRA"
+    is_paddle = train_type == "SFT/Full"
 
     if is_llama:
         bad = [k for k in hp if k in _LLAMAFACTORY_UNSUPPORTED]
@@ -882,61 +730,10 @@ def _validate_hyperparams(hp: dict, train_type: str, tool: str | None = None) ->
                 f"  lora_rank/lora_alpha -> ERNIE 不支持 LoRA")
 
 
-# --------------------------- upload verify -------------------- #
-
-def cmd_verify_upload(args: argparse.Namespace) -> None:
-    token = load_token(args)
-    info = git_contents(args.train_data, args.train_file, token)
-
-    is_lfs = info.get("is_lfs")
-    size = info.get("size")
-    sha = info.get("sha", "")
-    html_url = info.get("html_url", "")
-    local_size: int | None = None
-
-    if args.local_file:
-        p = Path(args.local_file)
-        if not p.exists():
-            die(f"本地文件不存在，无法对比大小：{p}")
-        local_size = p.stat().st_size
-
-    print("\n数据集上传校验结果")
-    print("-" * 55)
-    print(f"  数据集 repo_id： {args.train_data}")
-    print(f"  训练文件：       {args.train_file}")
-    print(f"  is_lfs：         {str(is_lfs).lower()}")
-    print(f"  仓库文件大小：   {size} bytes")
-    if local_size is not None:
-        print(f"  本地文件大小：   {local_size} bytes")
-    if sha:
-        print(f"  sha：            {sha}")
-    if html_url:
-        print(f"  文件页：         {html_url}")
-    print("-" * 55)
-
-    if is_lfs is not False:
-        die(
-            "训练文件不是普通 JSON/JSONL（is_lfs 不是 false）。\n"
-            "请到数据集文件页编辑 .gitattributes，删除训练文件扩展名对应的 LFS 规则，"
-            "再删除旧训练文件并重新上传。"
-        )
-
-    if local_size is not None and isinstance(size, int) and local_size != size:
-        print("[!]  仓库文件大小与本地文件不一致，请下载回本地后再跑 --check-data 确认内容。")
-    else:
-        print("[OK] 上传完成，训练文件是普通文件（is_lfs:false）。")
-
-    print("\n提交训练时使用：")
-    print(f"  --train-data {args.train_data}")
-    print(f"  --train-file {args.train_file}")
-    print()
-
-
 # ------------------------------ env check -------------------- #
 
 def cmd_env_check() -> None:
     import subprocess
-    import shutil
     ok = True
 
     # Python 版本
@@ -962,23 +759,6 @@ def cmd_env_check() -> None:
         else:
             print(f"[X]  requests 安装失败，请手动运行：pip install requests\n{result.stderr.strip()}")
             ok = False
-
-    # aistudio CLI
-    cli = shutil.which("aistudio")
-    user_base = subprocess.check_output([sys.executable, "-m", "site", "--user-base"], text=True).strip()
-    user_cli = Path(user_base) / "bin" / "aistudio"
-    if cli:
-        print(f"[OK] aistudio CLI {cli}")
-    elif user_cli.exists():
-        print(f"[!]  aistudio CLI 已安装但不在 PATH：{user_cli}")
-        print(f"     可临时使用：AISTUDIO_CLI=\"{user_cli}\"")
-    else:
-        print("[!]  aistudio CLI 未安装；自建数据集上传前运行：python3 -m pip install --upgrade aistudio-sdk")
-
-    env_tokens = [var for var in TOKEN_ENV_VARS if os.environ.get(var, "").strip()]
-    if env_tokens and AISTUDIO_CLI_TOKEN_PATH.exists():
-        print(f"[!]  已设置 {', '.join(env_tokens)}，会覆盖 SDK 缓存 token：{AISTUDIO_CLI_TOKEN_PATH}")
-        print("     若验证失败，先 unset 旧环境变量，或显式传 --api-key。")
 
     # 网络连通性（只做 DNS，不发 API 请求）
     import socket
@@ -1054,8 +834,6 @@ def _print_status(data: dict) -> None:
     if tb_url:
         if state == "running":
             print(f"\n  Tensorboard（实时 Loss 曲线）：")
-        elif state in {"waiting_data", "pending"}:
-            print(f"\n  Tensorboard（地址已生成，running 后再打开）：")
         else:
             print(f"\n  Tensorboard（训练已结束，实时数据流关闭，历史快照可能仍可访问）：")
         print(f"  {tb_url}")
@@ -1066,16 +844,13 @@ def _print_status(data: dict) -> None:
     print(f"{chr(45) * 55}\n")
 
     if state == "waiting_data":
-        print("提示：平台正在下载/挂载模型和数据集，通常需要 1-10 分钟。")
-        if tb_url:
-            print("Tensorboard 地址已生成，但要等进入 running 后再打开才有内容。")
-        print("如果超过 10 分钟，按序核对 repo_id、--train-file、is_lfs、文件大小和下载回验。")
-        print("若这些都正常且 system log 反复等待数据集下载，通常是平台内部的数据集挂载任务卡住，保留 jobId 便于排查。")
+        print("提示：正在下载模型和数据集，通常需要 1-10 分钟。")
+        print("如果超过 10 分钟，请检查数据集仓库是否已上传文件。")
     elif state == "pending":
         print("提示：任务已进入队列，等待 GPU 调度，通常 1-5 分钟。")
     elif state == "running" and phase == "training":
         if tb_url:
-            print(f"Tensorboard 可访问：{tb_url}")
+            print(f"Tensorboard 已自动打开（或手动访问）：{tb_url}")
         print("Loss 解读：持续下降 = 正常；每个 epoch 开始时突然上升 = 正常；")
         print("         一直不降或乱跳 = 数据质量有问题，先检查格式。")
     elif state == "succeeded":
@@ -1147,15 +922,6 @@ def _print_test_guide(output: dict) -> None:
   参考文档：https://aistudio.baidu.com/doc/model-api
 """)
 
-        print("""【第五步：发布状态】
-
-  训练产物已经上传到模型仓库。Skill 默认按公开发布处理；
-  如果 AiStudio 网页端显示该模型仍是私密，请到模型库页面改为公开，
-  并补充模型卡片、开源协议和可见性设置。
-  API 调用成功代表当前账号/Token 下模型可用；是否已公开展示，
-  仍需要以 AiStudio 模型库网页端为准。
-""")
-
     print("如果效果不达预期，告诉我具体现象，我来帮你分析原因。")
     print(separator)
 
@@ -1170,7 +936,7 @@ def _open_url(url: str) -> None:
 
 def _state_label(state: str, phase: str) -> str:
     labels = {
-        "waiting_data": "等待数据 (waiting_data) — 正在下载/挂载模型和数据集",
+        "waiting_data": "等待数据 (waiting_data) — 正在下载模型/数据集",
         "pending": "等待调度 (pending) — 等待 GPU 分配",
         "running": f"训练中 (running/{phase})" if phase else "运行中 (running)",
         "succeeded": "训练成功 (succeeded) [OK]",
@@ -1191,8 +957,6 @@ def cmd_poll(args: argparse.Namespace) -> None:
 
     terminal_states = {"succeeded", "failed", "cancelled"}
     tb_opened = False
-    waiting_data_since: float | None = None
-    waiting_system_checked = False
 
     try:
         while True:
@@ -1200,14 +964,14 @@ def cmd_poll(args: argparse.Namespace) -> None:
             state = data.get("state", "")
             phase = data.get("currentPhase", "")
 
-            # Tensorboard URL 可能在 waiting_data 阶段就生成；等 running 后再打开。
-            if not tb_opened and state == "running":
+            # 训练开始时自动打开 Tensorboard（只打开一次）
+            if state == "running" and phase == "training" and not tb_opened:
                 tb_url = data.get("tensorboardUrl", "")
                 if tb_url:
-                    print(f"\n  任务已进入 running，自动打开 Tensorboard…")
+                    print(f"\n  训练已开始，自动打开 Tensorboard 看板…")
                     _open_url(tb_url)
                     print()
-                    tb_opened = True
+                tb_opened = True
 
             # 单行进度
             progress = data.get("trainingProgress") or {}
@@ -1225,24 +989,9 @@ def cmd_poll(args: argparse.Namespace) -> None:
 
             print(f"  [{ts}]  {_state_label(state, phase)}{suffix}")
 
-            if state == "waiting_data":
-                if waiting_data_since is None:
-                    waiting_data_since = time.time()
-                elapsed = time.time() - waiting_data_since
-                if not waiting_system_checked and elapsed >= 600:
-                    print("\nwaiting_data 已超过 10 分钟，主动查看 system log：")
-                    _print_job_log(job_id, token, args.base_url, system=True, limit=80, soft=True)
-                    print()
-                    waiting_system_checked = True
-            else:
-                waiting_data_since = None
-
             if state in terminal_states:
                 print()
                 _print_status(data)
-                if state in {"failed", "cancelled"}:
-                    print("主动查看 system log：")
-                    _print_job_log(job_id, token, args.base_url, system=True, limit=120, soft=True)
                 break
 
             time.sleep(interval)
@@ -1254,28 +1003,22 @@ def cmd_poll(args: argparse.Namespace) -> None:
 
 # -------------------------------- logs ------------------------ #
 
-def _fetch_job_log(job_id: str, token: str, base_url: str, system: bool = False, byte_limit: int = 409500, soft: bool = False) -> str:
-    log_file = "system.log" if system else "master/output.log"
-    url = base_url.rstrip("/") + f"/v1/train/jobs/{job_id}/{log_file}"
+def cmd_logs(args: argparse.Namespace) -> None:
+    token = load_token(args)
+    job_id = args.logs
+    log_file = "system.log" if args.system else "master/output.log"
+    url = args.base_url.rstrip("/") + f"/v1/train/jobs/{job_id}/{log_file}"
 
     resp: requests.Response
     try:
-        resp = requests.get(url, headers={**headers(token), "Range": f"bytes=0-{byte_limit}"}, timeout=30)
+        resp = requests.get(url, headers={**headers(token), "Range": "bytes=0-409500"}, timeout=30)
     except Exception as e:
-        msg = f"获取{'system log' if system else 'stdout 日志'}失败：{e}"
-        if soft:
-            return f"[!] {msg}"
-        die(msg)
-        return ""
+        die(f"获取日志失败：{e}")
+        return
 
     if resp.status_code == 404:
-        msg = "system log 不可访问或尚未生成" if system else "stdout 日志尚未生成（任务可能尚未进入 running，或 job_id 错误）"
-        if soft:
-            return f"[!] {msg}"
-        die(msg)
+        die("日志文件不存在（任务可能还未开始，或 job_id 错误）")
     if resp.status_code == 401:
-        if soft:
-            return "[!] Token 认证失败"
         die("Token 认证失败")
 
     content = resp.content.decode("utf-8", errors="replace")
@@ -1285,55 +1028,21 @@ def _fetch_job_log(job_id: str, token: str, base_url: str, system: bool = False,
         try:
             err = json.loads(content)
             if isinstance(err, dict) and err.get("code", 0) != 0:
-                msg = _format_api_error(err["code"], err.get("msg", content))
-                if soft:
-                    return f"[!] {msg}"
-                die(msg)
+                die(f"API 错误（code={err['code']}）：{err.get('msg', content)}")
         except json.JSONDecodeError:
             pass
 
-    return content
-
-
-def _print_log_tail(content: str, limit: int = 100) -> None:
     if not content.strip():
         print("日志为空（任务可能还在等待中）")
         return
 
+    # 显示最后 100 行
     lines = content.splitlines()
-    if len(lines) > limit:
-        print(f"（共 {len(lines)} 行，显示最后 {limit} 行）\n")
-        lines = lines[-limit:]
+    if len(lines) > 100:
+        print(f"（共 {len(lines)} 行，显示最后 100 行）\n")
+        lines = lines[-100:]
 
     print("\n".join(lines))
-
-
-def _print_job_log(job_id: str, token: str, base_url: str, system: bool = False, limit: int = 100, soft: bool = False) -> None:
-    content = _fetch_job_log(job_id, token, base_url, system=system, soft=soft)
-    if content.startswith("[!] "):
-        print(content)
-        return
-    _print_log_tail(content, limit=limit)
-
-
-def cmd_logs(args: argparse.Namespace) -> None:
-    token = load_token(args)
-    _print_job_log(args.logs, token, args.base_url, system=args.system)
-
-
-def cmd_diagnose(args: argparse.Namespace) -> None:
-    token = load_token(args)
-    job_id = args.diagnose
-    data = api("GET", f"/v1/train/jobs/{job_id}", token, args.base_url)
-
-    print("\n任务状态")
-    _print_status(data)
-
-    print("System log（主动排查平台下载/挂载/调度）：")
-    _print_job_log(job_id, token, args.base_url, system=True, limit=120, soft=True)
-
-    print("\nStdout 日志（训练 loss/脚本错误）：")
-    _print_job_log(job_id, token, args.base_url, system=False, limit=80, soft=True)
 
 
 # -------------------------- train summary -------------------- #
@@ -1354,7 +1063,7 @@ def _fetch_log_content(job_id: str, token: str, base_url: str) -> str:
         try:
             err = json.loads(content)
             if isinstance(err, dict) and err.get("code", 0) != 0:
-                die(_format_api_error(err["code"], err.get("msg", content)))
+                die(f"API 错误（code={err['code']}）：{err.get('msg', content)}")
         except json.JSONDecodeError:
             pass
     return content
@@ -1501,11 +1210,9 @@ def cmd_open_tb(args: argparse.Namespace) -> None:
     job_id = args.open_tb
     data = api("GET", f"/v1/train/jobs/{job_id}", token, args.base_url)
     tb_url = data.get("tensorboardUrl", "")
-    state = data.get("state", "")
-    if state != "running":
-        die(f"当前状态为 {state or 'unknown'}，Tensorboard 等任务进入 running 后再打开。")
     if not tb_url:
-        die(f"该任务暂无 Tensorboard 地址（当前状态：{state}）。\n任务已进入 running 后可稍后再试。")
+        state = data.get("state", "")
+        die(f"该任务暂无 Tensorboard 地址（当前状态：{state}）。\n训练开始后（running/training）才会生成地址。")
     _open_url(tb_url)
 
 
@@ -1516,59 +1223,46 @@ def cmd_eval_guide(args: argparse.Namespace) -> None:
     if not path.exists():
         die(f"文件不存在：{path}")
 
-    records, _errors, _data_kind, _total_units = _load_data_records(path)
-    samples = [obj for _idx, obj, _preview in records[:200]]
+    lines = [l.strip() for l in path.read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()]
+    samples: list[dict] = []
+    for line in lines[:200]:
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict):
+                samples.append(obj)
+        except Exception:
+            pass
 
     if not samples:
         die("未能从文件中解析出有效样本。")
 
+    # 检测格式
+    first = samples[0]
+    is_ernie = "src" in first
+    is_sharegpt = not is_ernie and "conversations" in first and isinstance(first["conversations"], list)
+
     def _unwrap(val: object) -> str:
-        """ERNIE src/tgt 是 list，取第一个元素；否则直接转字符串。"""
         if isinstance(val, list):
             return str(val[0]) if val else ""
         return str(val) if val is not None else ""
 
-    def _prompt_answer(sample: dict) -> tuple[str, str]:
-        fmt = detect_format_obj(sample)
-        if fmt == "ernie":
-            return _unwrap(sample.get("src", "")), _unwrap(sample.get("tgt", ""))
-        if fmt == "alpaca":
-            prompt = str(sample.get("instruction", "") or "")
-            if sample.get("input"):
-                prompt += "\n" + str(sample.get("input"))
-            answer = sample.get("output")
-            if answer is None and isinstance(sample.get("chosen"), str):
-                answer = sample.get("chosen")
-            return prompt, str(answer or "")
-        if fmt == "sharegpt":
-            messages = sample.get("conversations")
-            role_key = "from"
-            content_key = "value"
-            user_roles = {"human", "user"}
-            assistant_roles = {"gpt", "assistant"}
-            if not isinstance(messages, list):
-                messages = sample.get("messages")
-                role_key = "role"
-                content_key = "content"
-                user_roles = {"user"}
-                assistant_roles = {"assistant"}
-            prompt = ""
-            answer = ""
-            if isinstance(messages, list):
-                for msg in messages:
-                    if not isinstance(msg, dict):
-                        continue
-                    role = msg.get(role_key)
-                    content = str(msg.get(content_key, "") or "")
-                    if not prompt and role in user_roles:
-                        prompt = content
-                    if role in assistant_roles:
-                        answer = content
-            chosen = sample.get("chosen")
-            if not answer and isinstance(chosen, dict):
-                answer = str(chosen.get("value") or chosen.get("content") or "")
-            return prompt, answer
-        return "", ""
+    def _get_src(s: dict) -> str:
+        if is_ernie:
+            return _unwrap(s.get("src", ""))
+        if is_sharegpt:
+            convs = s.get("conversations", [])
+            human = next((c.get("value", "") for c in convs if c.get("from") == "human"), "")
+            return str(human)
+        return _unwrap(s.get("instruction", ""))
+
+    def _get_tgt(s: dict) -> str:
+        if is_ernie:
+            return _unwrap(s.get("tgt", ""))
+        if is_sharegpt:
+            convs = s.get("conversations", [])
+            gpt = next((c.get("value", "") for c in convs if c.get("from") == "gpt"), "")
+            return str(gpt)
+        return _unwrap(s.get("output", ""))
 
     # 选取最多 5 个有代表性的样本
     random.seed(42)
@@ -1582,17 +1276,15 @@ def cmd_eval_guide(args: argparse.Namespace) -> None:
     print("【测试问题 1：训练集内问题（验证是否学到）】")
     print("将以下问题发给微调后的模型，看回答是否接近期望输出：\n")
     for i, s in enumerate(picked[:3], 1):
-        src, tgt = _prompt_answer(s)
-        src = src[:120]
-        tgt = tgt[:80]
+        src = _get_src(s)[:120]
+        tgt = _get_tgt(s)[:80]
         print(f"  问题 {i}：{src}")
         print(f"  期望回答（节选）：{tgt}...\n")
 
     print("\n【泛化测试：换个说法问同类问题】")
     print("把下面这些问题用自己的话改写后再问一遍，看风格是否保持一致：\n")
     for i, s in enumerate(picked[:2], 1):
-        src, _tgt = _prompt_answer(s)
-        src = src[:120]
+        src = _get_src(s)[:120]
         print(f"  问题 {i}：{src}\n")
 
     print("\n【效果判断标准】")
@@ -1618,7 +1310,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     # 子命令
     p.add_argument("--verify-token", action="store_true", help="验证 Access Token 是否有效")
-    p.add_argument("--verify-upload", action="store_true", help="验证数据集上传结果并打印回执")
     p.add_argument("--list-models", action="store_true", help="列出平台白名单中所有可用模型")
     p.add_argument("--list-datasets", action="store_true", help="列出内置推荐数据集（不用自己准备数据）")
     p.add_argument("--check-data", metavar="FILE", help="检查数据格式")
@@ -1630,23 +1321,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--interval", type=int, default=30, metavar="SEC", help="轮询间隔（秒，默认 30）")
     p.add_argument("--logs", metavar="JOB_ID", help="查看训练日志")
     p.add_argument("--system", action="store_true", help="查看系统日志（配合 --logs）")
-    p.add_argument("--diagnose", metavar="JOB_ID", help="主动诊断任务状态、system log 和 stdout")
     p.add_argument("--cancel", metavar="JOB_ID", help="取消任务")
-    p.add_argument("--open-tb", metavar="JOB_ID", help="任务 running 后打开 Tensorboard")
+    p.add_argument("--open-tb", metavar="JOB_ID", help="打开 Tensorboard 看板")
     p.add_argument("--eval-guide", metavar="FILE", help="根据训练数据生成测试问题")
     p.add_argument("--train-summary", metavar="JOB_ID", help="训练完成后汇报 loss/lr 趋势")
 
     # submit 参数
     p.add_argument("--submit", action="store_true", help="提交训练任务")
     p.add_argument("--base-model", metavar="MODEL", help="基底模型（如 PaddlePaddle/ERNIE-4.5-0.3B-PT）")
-    p.add_argument("--train-type", default="SFT/Full", metavar="TYPE", help="训练类型（默认 SFT/Full；可选 SFT/LoRA | DPO | KTO）")
-    p.add_argument("--train-data", metavar="REPO_ID", help="数据集仓库路径，必须是详情页真实 repo_id（如 gitlogin/my_dataset）")
-    p.add_argument("--train-file", metavar="FILENAME", help="数据文件名（如 train.jsonl；强烈建议指定，省略时平台会自动选择首个 JSON/JSONL）")
-    p.add_argument("--local-file", metavar="FILE", help="本地训练文件路径（配合 --verify-upload 对比大小）")
+    p.add_argument("--train-type", metavar="TYPE", help="训练类型（SFT/Full | SFT/LoRA）")
+    p.add_argument("--train-data", metavar="USER/DATASET", help="数据集仓库路径（如 myuser/my_dataset）")
+    p.add_argument("--train-file", metavar="FILENAME", help="数据文件名（如 train.jsonl）")
     p.add_argument("--params", metavar="JSON", help="超参数 JSON 字符串")
     p.add_argument("--name", metavar="NAME", help="任务名称（只允许字母、数字、下划线）")
     p.add_argument("--description", metavar="DESC", help="任务描述")
-    p.add_argument("--output-repo", metavar="GITLOGIN/REPO", help="模型输出仓库（可选；命名空间必须可写）")
+    p.add_argument("--output-repo", metavar="USER/REPO", help="模型输出仓库（可选）")
     p.add_argument("--max-run-time", type=int, metavar="HOURS", help="最长运行时间（小时，1-240）")
 
     return p
@@ -1666,17 +1355,13 @@ def main() -> None:
         cmd_list_datasets(args)
     elif args.check_data:
         cmd_check_data(args)
-    elif args.verify_upload:
-        if not args.train_data:
-            parser.error("--verify-upload 需要 --train-data")
-        if not args.train_file:
-            parser.error("--verify-upload 需要 --train-file")
-        cmd_verify_upload(args)
     elif args.suggest_params:
         cmd_suggest_params(args)
     elif args.submit:
         if not args.base_model:
             parser.error("--submit 需要 --base-model")
+        if not args.train_type:
+            parser.error("--submit 需要 --train-type")
         if not args.train_data:
             parser.error("--submit 需要 --train-data")
         cmd_submit(args)
@@ -1686,8 +1371,6 @@ def main() -> None:
         cmd_poll(args)
     elif args.logs:
         cmd_logs(args)
-    elif args.diagnose:
-        cmd_diagnose(args)
     elif args.cancel:
         cmd_cancel(args)
     elif args.open_tb:
