@@ -65,7 +65,7 @@ python3 "$SKILL_PATH/scripts/train.py" --env-check
 准备顺序：
 1. 如果当前会话可用 `web-access` skill，先加载它并遵循其 `SKILL.md`
 2. 如果 skill 元数据没触发，但 `$HOME/.codex/skills/web-access/SKILL.md` 存在，直接把 `WEB_ACCESS_SKILL_PATH` 指向该目录并运行 `scripts/check-deps.sh`
-3. 如果目录不存在，先使用 `skill-installer` 安装 [`web-access`](https://github.com/eze-is/web-access)。安装完成后可立即用安装目录下的 `scripts/check-deps.sh`；同时告诉用户重启 Codex 后后续会话才能自动识别新 skill
+3. 如果目录不存在，先使用 `skill-installer` 安装 [`web-access`](https://github.com/eze-is/web-access)。安装完成后可立即用安装目录下的 `scripts/check-deps.sh`；同时告诉用户重启 AI IDE / 刷新 Agent 会话后才能自动识别新 skill
 4. 如果安装失败或 Chrome 远程调试授权不可用，才退回让用户手动在网页创建数据集仓库
 
 检查命令：
