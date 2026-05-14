@@ -1,6 +1,6 @@
 ---
 name: cli-trainer
-description: 引导用户在百度 AI Studio 无代码训练平台完成大模型微调。支持 ERNIE（SFT/Full）和开源模型（Qwen、LLaMA 等）；自建数据集需创建新版 Git 仓库型数据集，上传优先参考 references/aistudio_sdk_upload.md，并必须校验 is_lfs:false。当用户提到"微调"、"训练模型"、"无代码训练"、"SFT"、"fine-tune"、"AiStudio 训练"、"ERNIE 微调"、"模型训练"、"finetune"时，优先使用这个 skill。
+description: 引导用户在 AI Studio 无代码训练平台完成大模型微调，支持 ERNIE 和开源模型（Qwen/LLaMA）。当用户提到微调、训练模型、SFT、fine-tune、问答对、让模型学会、定制领域助手、专属领域 AI、行业术语、调教模型、业务知识注入、领域适配、医疗问答、客服问答、无代码训练、AiStudio 训练、ERNIE 微调、模型训练、finetune 时，优先触发。
 
 ---
 
@@ -320,6 +320,169 @@ python3 "$SKILL_PATH/scripts/train.py" --logs JOB_ID --system  # 单独查 syste
 ```bash
 python3 "$SKILL_PATH/scripts/train.py" --train-summary 训练任务ID
 ```
+
+训练 `succeeded` 后，**必须自动完成以下两步，不要等用户提醒**：
+
+#### 第一步：通过 git 自动推送 README（已验证可行）
+
+AI Studio 模型仓库支持通过 git 推送，用 Access Token 作为密码：
+
+```bash
+# 将 REPO_ID 替换为实际仓库路径，如 18610248/train_c8979534
+cd /tmp && rm -rf model_readme_tmp
+git clone "https://$AISTUDIO_ACCESS_TOKEN:$AISTUDIO_ACCESS_TOKEN@git.aistudio.baidu.com/$REPO_ID.git" model_readme_tmp \
+  --no-checkout --depth=1 --filter=blob:none 2>&1 | tail -3
+
+cd /tmp/model_readme_tmp
+git sparse-checkout init --cone
+git sparse-checkout set README.md
+git checkout
+
+# 写入 README（见下方模板，按实际训练信息填充）
+cat > README.md << 'EOF'
+...内容见下方模板...
+EOF
+
+git config user.email "train@aistudio.baidu.com"
+git config user.name "AI Studio Train"
+git add README.md
+git commit -m "docs: 完善模型卡片 README"
+git push origin master
+```
+
+克隆时用 `--filter=blob:none --no-checkout` + sparse-checkout 只拉 README，跳过 LFS 大文件，速度快且不会因 LFS 报错中断。
+
+**README 模板**（根据实际训练信息自动填充，**禁止保留任何 `{}` 占位符**）：
+
+填写规则（在写入前在内部完成替换）：
+- **模型名称**：用"基座模型简称-领域-用途"命名，如 `ERNIE-0.3B-医疗问答`、`Qwen2.5-7B-客服助手`
+- **一句话介绍**：格式固定为"基于 {base_model}，用 {N} 条 {领域/来源} 数据微调，擅长 {具体能力描述}"
+- **训练框架**：ERNIE 系列 → ERNIEKit；Qwen/LLaMA 等开源模型 → LlamaFactory
+- **训练数据集**：填写 repo_id 并附链接 `https://aistudio.baidu.com/datasetdetail/{DATASET_ID}`
+- **超参数表**：从 `--submit` 时的 `--params` JSON 中提取每个字段的真实值；SFT/LoRA 时额外追加 lora_rank / lora_alpha / lora_dropout 行
+- **训练结果**：从 `--train-summary` 输出中提取起始 Loss 和最终 Loss，计算下降百分比，判断收敛状态（末段 loss 持续下降且稳定 → 正常，末段 loss 波动或不降 → 需关注）
+- **适用场景**：根据训练数据内容和模型命名推断 3-5 个场景，例子：医疗问答模型 → 患者症状咨询、疾病知识普及、用药注意事项查询
+
+```markdown
+---
+license: Apache License 2.0
+---
+
+## {模型名称}介绍
+
+{一句话介绍：基于 base_model，用 N 条领域数据微调，擅长具体能力}
+
+## 模型描述
+
+| 项目 | 详情 |
+|------|------|
+| 基座模型 | {base_model 完整名称} |
+| 训练框架 | {ERNIEKit 或 LlamaFactory} |
+| 训练方式 | {SFT/Full 或 SFT/LoRA} |
+| 训练数据集 | [{repo_id}](https://aistudio.baidu.com/datasetdetail/{DATASET_ID}) |
+| 训练数据规模 | {N} 条问答对 |
+| 语言 | 中文 |
+| 开源协议 | Apache License 2.0 |
+
+### 训练配置
+
+| 超参数 | 值 |
+|--------|-----|
+| num_train_epochs | {实际值} |
+| learning_rate | {实际值} |
+| cutoff_len / max_seq_len | {实际值} |
+| per_device_train_batch_size | {实际值} |
+| bf16 / fp16 | {true/false} |
+（SFT/LoRA 时追加：lora_rank / lora_alpha / lora_dropout 的实际值）
+
+### 训练结果
+
+- 起始 Loss：{train_summary 中的值} → 最终 Loss：{train_summary 中的值}，下降 {计算百分比}%，收敛{正常/需关注}
+
+## 期望模型使用方式以及适用范围
+
+根据训练数据内容列出 3-5 个具体适用场景（**必须具体到业务动作**，不要写"通用文本生成"此类泛化描述）：
+- 场景 1：{具体任务，如：回答患者关于某类药物的副作用问题}
+- 场景 2：...
+- 场景 3：...
+
+### 如何使用
+
+#### API 调用
+
+\`\`\`python
+import requests
+
+resp = requests.post(
+    "https://aistudio.baidu.com/llm/lmapi/v1/chat/completions",
+    headers={"Content-Type": "application/json", "Authorization": f"token YOUR_TOKEN"},
+    json={
+        "model": "{REPO_ID}",
+        "messages": [{"role": "user", "content": "你的问题"}]
+    }
+)
+print(resp.json()["choices"][0]["message"]["content"])
+\`\`\`
+
+### 代码范例
+
+{提供一个完整的可运行代码示例}
+
+### 模型局限性以及可能的偏差
+
+{说明 LoRA/Full 的局限、cutoff_len 截断问题、训练数据分布限制等}
+
+### 训练数据介绍
+
+{数据集来源、格式、规模}
+
+### 数据评估及结果
+
+| 指标 | 值 |
+|------|-----|
+| 起始 Loss | {值} |
+| 最终 Loss | {值} |
+| Loss 下降幅度 | {值}% |
+| 训练步数 | {值} 步 |
+```
+
+#### 第二步：设置模型元信息标签 + 确认公开状态
+
+git push 只能更新 README 文件内容，**标签（多语言、任务方向、训练框架、基座模型）和公开状态必须通过网页端操作**。
+
+**默认标签选择规则**（根据训练场景选择，不要只选"文本生成"一个）：
+
+| 维度 | 选择规则 |
+|------|---------|
+| 多语言 | 中文数据 → **中文**；英文数据 → **English**；混合 → 两个都选 |
+| 任务方向 | 问答对 / QA / 知识库 → **问答** + **文本生成**<br>对话 / Chat / 角色扮演 → **文本对话** + **文本生成**<br>分类/NER/抽取 → **文本分类** 或 **命名实体识别**<br>写作/摘要 → **文本生成**<br>医疗/法律/金融等专业领域 → 在以上基础上额外添加对应领域标签 |
+| 训练框架 | ERNIE 系列 → **ERNIEKit**；Qwen/LLaMA 等 → **LlamaFactory** |
+| 基座模型 | 搜索 base_model 名称（如 `ERNIE-4.5-0.3B`），选中匹配项 |
+
+**优先使用 Playwright MCP 自动完成**（已验证可行）：
+
+```
+模型空间 Tab → 模型元信息 区域：
+- 多语言：点击添加 → 按上表选中对应语言 → 确定
+- 任务方向：点击添加 → 按上表选中 1-2 个任务标签 → 确定
+- 训练框架：下拉选择 ERNIEKit（ERNIE 模型）或 LlamaFactory（开源模型）
+- 基座模型：点击添加 → 搜索 base model 名称 → 选中 → 确定
+填写 commit 信息 → 点击"完成编辑"保存
+```
+
+Playwright 操作要点（已踩坑）：
+- 弹出的多选框不在 accessibility tree 里，必须用坐标点击：先用 `page.evaluate` 找 span 的坐标，再 `page.mouse.click`
+- 训练框架是单选 combobox，直接点选项文本即可，无需确定按钮
+- 基座模型有搜索框，在弹窗内找到 `input[placeholder="请输入搜索关键词"]` 并区分它和顶部导航搜索框（用坐标或 index 区分）
+- 每个多选弹窗确认后，点"完成编辑"时需要填写 commit 信息，否则提交不会生效
+
+**确认公开状态**（必须主动执行）：
+
+导航到 `https://aistudio.baidu.com/modelsdetail/{MODEL_ID}/setModel`，检查右侧"其他设置"区域：
+- 显示"当前模型状态为 **公开**" → 无需操作
+- 显示私密 → 点击"设为公开"切换
+
+在给用户的最终回复里，提供一个不超过 200 字的**模型简介**建议文本，用户可直接粘贴到星河社区模型简介框。
 
 ### LoRA 产物可用性确认
 
