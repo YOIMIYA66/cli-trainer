@@ -50,6 +50,29 @@ python3 "$SKILL_PATH/scripts/train.py" --env-check
 检查内容：Python 版本（需 3.8+）、requests 包（缺失时自动 pip install）、网络连通性。
 如果 python3 命令本身不存在，告知用户安装 Python 3.8+：macOS 用 `brew install python3`，其他平台参考 https://www.python.org/downloads/
 
+### 通用 [web-access](https://github.com/eze-is/web-access) / Codex 推荐安装 Playwright MCP
+
+自建数据集、网页端创建数据集仓库、必要时初始化 Gitea 或操作登录后网页时，不要只固定使用一种浏览器方案。这里按"通用 web-access / Codex 推荐安装 Playwright MCP"处理：Codex 环境优先安装/启用 Playwright MCP；需要复用用户日常 Chrome 登录态时，再使用 `web-access`。目标是拿到页面详情页真实 `repo_id` 并完成必要的 `.gitattributes` 编辑；优先选择当前可用、已登录、最少阻塞的浏览器自动化能力。
+
+推荐顺序：
+1. **Playwright MCP 可用且页面已登录时优先使用。** 适合打开 AI Studio 页面、创建数据集、填写表单、选择协议、编辑 `.gitattributes`、读取 `repo_id`。常用能力：`browser_navigate`、`browser_snapshot`、`browser_click`、`browser_fill_form`、`browser_evaluate`。它不依赖用户 Chrome 的 remote debugging 授权，CDP 授权卡住时尤其适合。
+2. **需要用户日常 Chrome 登录态时使用 `web-access`。** 如果 Playwright 未登录、页面需要真实 Chrome cookie/扩展/特殊会话，加载 `web-access` skill 并启动 CDP Proxy。
+3. **两者都不可用时再让用户手动创建仓库。** 此时给出最短步骤，并要求用户回传详情页真实 `repo_id`，不要猜。
+
+进入上传/建仓步骤前，若选择 `web-access`，按下面流程检查并准备它。
+
+准备顺序：
+1. 如果当前会话可用 `web-access` skill，先加载它并遵循其 `SKILL.md`
+2. 如果 skill 元数据没触发，但 `$HOME/.codex/skills/web-access/SKILL.md` 存在，直接把 `WEB_ACCESS_SKILL_PATH` 指向该目录并运行 `scripts/check-deps.sh`
+3. 如果目录不存在，先使用 `skill-installer` 安装 [`web-access`](https://github.com/eze-is/web-access)。安装完成后可立即用安装目录下的 `scripts/check-deps.sh`；同时告诉用户重启 AI IDE / 刷新 Agent 会话后才能自动识别新 skill
+4. 如果安装失败或 Chrome 远程调试授权不可用，才退回让用户手动在网页创建数据集仓库
+
+检查命令：
+```bash
+WEB_ACCESS_SKILL_PATH="${WEB_ACCESS_SKILL_PATH:-$HOME/.codex/skills/web-access}"
+bash "$WEB_ACCESS_SKILL_PATH/scripts/check-deps.sh"
+```
+
 ### Token
 
 四种方式（推荐环境变量）：
