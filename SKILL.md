@@ -217,7 +217,10 @@ python3 "$SKILL_PATH/scripts/train.py" --suggest-params 数据文件.jsonl --mod
 | `gradient_accumulation_steps` | int | `8` | 梯度累积步数，等效 batch = `batch_size × accumulation` |
 | `cutoff_len` | int | `1024` | 最大序列长度，长文本场景可调至 `2048`/`4096`，显存随之增大 |
 | `warmup_ratio` | float | `0.1` | 学习率预热比例 |
+| `lr_scheduler_type` | string | `"cosine"` | 学习率调度策略：`cosine`、`linear`、`constant` |
+| `max_grad_norm` | float | `1.0` | 梯度裁剪阈值，防止梯度爆炸 |
 | `logging_steps` | int | `5` | 日志打印间隔 |
+| `save_steps` | int | `50` | checkpoint 保存间隔 |
 | `fp16` | bool | `true` | 混合精度 |
 
 **LlamaFactory（SFT/LoRA 时生效）LoRA 参数：**
@@ -271,6 +274,23 @@ python3 "$SKILL_PATH/scripts/train.py" --open-tb JOB_ID
 - `succeeded`：运行 `--train-summary JOB_ID` 汇报最终 loss、模型仓库和测试建议
 - `failed/cancelled`：必须主动运行 `--diagnose JOB_ID`，结合 system log 说明失败原因
 - `waiting_data` 超过 10 分钟：必须主动运行 `--diagnose JOB_ID`；先按上传门禁核对 `repo_id`、`--train-file`、`is_lfs:false`、文件大小和下载回验；若这些都通过且 system log 持续卡在数据集下载，按平台 mount 异常处理，不要让用户重复修同一份数据
+
+### 监控进度
+
+```bash
+python3 "$SKILL_PATH/scripts/train.py" --status JOB_ID    # 查一次
+python3 "$SKILL_PATH/scripts/train.py" --diagnose JOB_ID  # 主动查状态 + system log + stdout
+python3 "$SKILL_PATH/scripts/train.py" --logs JOB_ID      # 查 stdout loss
+python3 "$SKILL_PATH/scripts/train.py" --logs JOB_ID --system  # 单独查 system log
+```
+
+状态含义：`waiting_data`（下载中，1-10min）→ `pending`（等 GPU，1-5min）→ `running`（训练中）→ `succeeded`
+
+- `--logs` 查 stdout 是最可靠的 loss 监控方式，ERNIE/LlamaFactory 都支持
+- `--diagnose` 是异常排查首选，会主动拉 system log；用于 `waiting_data` 超时、`failed`、`cancelled`、平台挂载/调度问题
+- `--train-summary` 会从日志解析 loss/lr 并输出训练趋势，训练完成后依然有效
+- Tensorboard 仅训练中（running 阶段）有效，训练结束后数据流关闭，不再展示
+- `--poll` 会阻塞终端；对话场景不能长期占用终端时，改为周期性运行 `--status`、`--diagnose`、`--logs`、`--train-summary`
 
 ### 训练完成后
 
