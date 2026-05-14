@@ -96,13 +96,6 @@ aistudio config -t "$AISTUDIO_ACCESS_TOKEN" >/dev/null        # 写入 ~/.cache/
 | CUDA Runtime | corex-4.3.8 | - |
 | GPU 显存 | ~32GB | Full SFT 7B 时 OOM；LoRA + cutoff=2048 + batch=1 可稳定运行 |
 
-**模型兼容性速查（基于实测）：**
-- ✅ Qwen2.5 系列（任意大小）
-- ✅ Llama 3 系列
-- ❌ Qwen3 系列（需要 Transformers 4.51+，平台版本不够）
-- ❌ DeepSeek-R1 系列（`deepseek_r1` chat template 不存在，架构无关）
-- ❌ PaddleNLP/Qwen3-8B（tokenizer_config.json 为空文件，仓库损坏）
-- ❌ GLM 系列（ModelHub/GLM-4.6、GLM-4.7 等）**服务端硬拒，code=10002**，客户端绕过无效，勿再尝试
 
 ### 选模型
 
