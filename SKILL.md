@@ -31,7 +31,7 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data my_data.jsonl
 2. **鉴权** — 确认有 Access Token，没有就引导去 https://aistudio.baidu.com/account/accessToken 获取
 3. **选模型** — 运行 `--list-models` 展示白名单，让用户选，不要让用户自己猜名称
 4. **验数据** — 运行 `--check-data` 检查格式，提前发现错误
-5. **准备/上传数据集** — 训练在飞桨星河隔离集群运行，只能访问 AiStudio 新版 Git 仓库型数据集（`git.aistudio.baidu.com`），不支持外部 URL 或 HuggingFace。创建或上传前必须先确认真实 `gitlogin` 和完整 `repo_id`；不要把昵称、展示名、登录用户名或邮箱当成 `gitlogin`。如果用户没有现成 `repo_id`，优先使用当前会话可用且已登录的浏览器自动化能力创建或打开数据集仓库并抽取页面上的真实 `repo_id`：可用 Playwright MCP 时可以直接用 `browser_navigate`/`browser_snapshot`/`browser_click`/`browser_fill_form`/`browser_evaluate`；需要复用用户日常 Chrome 登录态或 Playwright 未登录时，再加载 `web-access` skill，按它的实际安装目录运行 `scripts/check-deps.sh` 检查并启动 CDP Proxy。上传训练 JSON/JSONL 前必须处理 `.gitattributes` 中对应的 LFS 规则，上传后确认 `is_lfs: false`。
+5. **准备/上传数据集** — 只能访问 AiStudio 新版 Git 仓库型数据集，不支持外部 URL。创建仓库时先确认真实 `gitlogin`；用 Playwright MCP 或 `web-access` skill 创建仓库并拿到真实 `repo_id`；上传前删除 `.gitattributes` 中的 LFS 规则，上传后确认 `is_lfs: false`。
 6. **推荐超参** — 运行 `--suggest-params`，展示结果，**等用户确认后才提交**
 7. **提交训练** — 运行 `--submit`，拿到 jobId
 8. **监控训练** — 提交后运行 `--poll JOB_ID`；任务进入 running 且接口返回 `tensorboardUrl` 后自动打开 Tensorboard
@@ -50,58 +50,36 @@ python3 "$SKILL_PATH/scripts/train.py" --env-check
 检查内容：Python 版本（需 3.8+）、requests 包（缺失时自动 pip install）、网络连通性。
 如果 python3 命令本身不存在，告知用户安装 Python 3.8+：macOS 用 `brew install python3`，其他平台参考 https://www.python.org/downloads/
 
-### 通用 [web-access](https://github.com/eze-is/web-access) / Codex 推荐安装 Playwright MCP
-
-自建数据集、网页端创建数据集仓库、必要时初始化 Gitea 或操作登录后网页时，不要只固定使用一种浏览器方案。这里按“通用 web-access / Codex 推荐安装 Playwright MCP”处理：Codex 环境优先安装/启用 Playwright MCP；需要复用用户日常 Chrome 登录态时，再使用 `web-access`。目标是拿到页面详情页真实 `repo_id` 并完成必要的 `.gitattributes` 编辑；优先选择当前可用、已登录、最少阻塞的浏览器自动化能力。
-
-推荐顺序：
-1. **Playwright MCP 可用且页面已登录时优先使用。** 适合打开 AI Studio 页面、创建数据集、填写表单、选择协议、编辑 `.gitattributes`、读取 `repo_id`。常用能力：`browser_navigate`、`browser_snapshot`、`browser_click`、`browser_fill_form`、`browser_evaluate`。它不依赖用户 Chrome 的 remote debugging 授权，CDP 授权卡住时尤其适合。
-2. **需要用户日常 Chrome 登录态时使用 `web-access`。** 如果 Playwright 未登录、页面需要真实 Chrome cookie/扩展/特殊会话，加载 `web-access` skill 并启动 CDP Proxy。
-3. **两者都不可用时再让用户手动创建仓库。** 此时给出最短步骤，并要求用户回传详情页真实 `repo_id`，不要猜。
-
-进入上传/建仓步骤前，若选择 `web-access`，按下面流程检查并准备它。
-
-准备顺序：
-1. 如果当前会话可用 `web-access` skill，先加载它并遵循其 `SKILL.md`
-2. 如果 skill 元数据没触发，但 `$HOME/.codex/skills/web-access/SKILL.md` 存在，直接把 `WEB_ACCESS_SKILL_PATH` 指向该目录并运行 `scripts/check-deps.sh`
-3. 如果目录不存在，先使用 `skill-installer` 安装 [`web-access`](https://github.com/eze-is/web-access)。安装完成后可立即用安装目录下的 `scripts/check-deps.sh`；同时告诉用户重启 AI IDE / 刷新 Agent 会话后才能自动识别新 skill
-4. 如果安装失败或 Chrome 远程调试授权不可用，才退回让用户手动在网页创建数据集仓库
-
-检查命令：
-```bash
-WEB_ACCESS_SKILL_PATH="${WEB_ACCESS_SKILL_PATH:-$HOME/.codex/skills/web-access}"
-bash "$WEB_ACCESS_SKILL_PATH/scripts/check-deps.sh"
-```
-
 ### Token
 
-四种方式（推荐环境变量；也兼容 AI Studio SDK 缓存）：
+四种方式（推荐环境变量）：
 ```bash
-export AISTUDIO_ACCESS_TOKEN="your_token_here"                 # 方式 1：环境变量（推荐）
+export AISTUDIO_ACCESS_TOKEN="your_token_here"                 # 环境变量（推荐）
 python3 "$SKILL_PATH/scripts/train.py" --api-key "your_token_here" --verify-token
-python3 "$SKILL_PATH/scripts/train.py" --env-file .aistudio.env --verify-token
-aistudio config -t "your_token_here"                           # 方式 4：写入 ~/.cache/aistudio/.auth/token
+python3 "$SKILL_PATH/scripts/train.py" --env-file .aistudio.env --verify-token  # 文件内容：AISTUDIO_ACCESS_TOKEN=xxx
+aistudio config -t "$AISTUDIO_ACCESS_TOKEN" >/dev/null        # 写入 ~/.cache/aistudio/.auth/token
 ```
 
-注意：`aistudio config -t ...` 可能把 token 回显到命令输出。对话场景里不要裸跑；如需写入 SDK 缓存，先定位 CLI 并重定向输出：
-```bash
-AISTUDIO_CLI="${AISTUDIO_CLI:-$(python3 -m site --user-base)/bin/aistudio}"
-[ -x "$AISTUDIO_CLI" ] || AISTUDIO_CLI="$(command -v aistudio)"
-"$AISTUDIO_CLI" config -t "$AISTUDIO_ACCESS_TOKEN" >/dev/null 2>/dev/null
-```
+验证：`python3 "$SKILL_PATH/scripts/train.py" --verify-token`
 
-`.aistudio.env` 示例：
-```bash
-AISTUDIO_ACCESS_TOKEN=your_token_here
-```
+如果已用 `aistudio config/login` 配过 token，脚本无环境变量时自动读取 SDK 缓存；环境变量里的过期 token 会覆盖缓存，遇到 401 先检查环境变量。
 
-如果使用环境变量，验证命令：
-```bash
-python3 "$SKILL_PATH/scripts/train.py" --verify-token
-```
+### 平台运行环境（已验证，2026-05-14）
 
-如果已经用 `aistudio config` 或 `aistudio login` 配过 token，脚本会在没有 `AISTUDIO_ACCESS_TOKEN/AISTUDIO_API_KEY` 环境变量时自动读取 `~/.cache/aistudio/.auth/token`。如果环境变量里留着过期 token，它会覆盖 SDK 缓存；遇到 401 时先检查环境变量。
-`--env-check` 会提示 CLI 是否在 PATH，以及是否存在环境变量覆盖 SDK 缓存的情况。
+| 组件 | 版本 | 影响 |
+|------|------|------|
+| Transformers | **4.49.0** | Qwen3 需要 4.51+，平台**不支持**；Qwen2.5 完全支持 |
+| LlamaFactory | 未打印版本号 | 不支持 `deepseek_r1` chat template（所有 DeepSeek-R1 系列均失败）；`template` 超参数被 API 拒绝（code=10007） |
+| CUDA Runtime | corex-4.3.8 | - |
+| GPU 显存 | ~32GB | Full SFT 7B 时 OOM；LoRA + cutoff=2048 + batch=1 可稳定运行 |
+
+**模型兼容性速查（基于实测）：**
+- ✅ Qwen2.5 系列（任意大小）
+- ✅ Llama 3 系列
+- ❌ Qwen3 系列（需要 Transformers 4.51+，平台版本不够）
+- ❌ DeepSeek-R1 系列（`deepseek_r1` chat template 不存在，架构无关）
+- ❌ PaddleNLP/Qwen3-8B（tokenizer_config.json 为空文件，仓库损坏）
+- ❌ GLM 系列（ModelHub/GLM-4.6、GLM-4.7 等）**服务端硬拒，code=10002**，客户端绕过无效，勿再尝试
 
 ### 选模型
 
@@ -238,11 +216,8 @@ python3 "$SKILL_PATH/scripts/train.py" --suggest-params 数据文件.jsonl --mod
 | `per_device_train_batch_size` | int | `2` | 单卡 batch size，0.5B 可用 `2`~`8`，7B+ 建议 `1`~`2` |
 | `gradient_accumulation_steps` | int | `8` | 梯度累积步数，等效 batch = `batch_size × accumulation` |
 | `cutoff_len` | int | `1024` | 最大序列长度，长文本场景可调至 `2048`/`4096`，显存随之增大 |
-| `warmup_ratio` | float | `0.1` | 学习率预热比例，建议 `0.05`~`0.1` |
-| `lr_scheduler_type` | string | `"cosine"` | 学习率调度策略：`cosine`、`linear`、`constant` |
-| `max_grad_norm` | float | `1.0` | 梯度裁剪阈值，防止梯度爆炸 |
+| `warmup_ratio` | float | `0.1` | 学习率预热比例 |
 | `logging_steps` | int | `5` | 日志打印间隔 |
-| `save_steps` | int | `50` | checkpoint 保存间隔 |
 | `fp16` | bool | `true` | 混合精度 |
 
 **LlamaFactory（SFT/LoRA 时生效）LoRA 参数：**
@@ -297,23 +272,6 @@ python3 "$SKILL_PATH/scripts/train.py" --open-tb JOB_ID
 - `failed/cancelled`：必须主动运行 `--diagnose JOB_ID`，结合 system log 说明失败原因
 - `waiting_data` 超过 10 分钟：必须主动运行 `--diagnose JOB_ID`；先按上传门禁核对 `repo_id`、`--train-file`、`is_lfs:false`、文件大小和下载回验；若这些都通过且 system log 持续卡在数据集下载，按平台 mount 异常处理，不要让用户重复修同一份数据
 
-### 监控进度
-
-```bash
-python3 "$SKILL_PATH/scripts/train.py" --status JOB_ID    # 查一次
-python3 "$SKILL_PATH/scripts/train.py" --diagnose JOB_ID  # 主动查状态 + system log + stdout
-python3 "$SKILL_PATH/scripts/train.py" --logs JOB_ID      # 查 stdout loss
-python3 "$SKILL_PATH/scripts/train.py" --logs JOB_ID --system  # 单独查 system log
-```
-
-状态含义：`waiting_data`（下载中，1-10min）→ `pending`（等 GPU，1-5min）→ `running`（训练中）→ `succeeded`
-
-- `--logs` 查 stdout 是最可靠的 loss 监控方式，ERNIE/LlamaFactory 都支持
-- `--diagnose` 是异常排查首选，会主动拉 system log；用于 `waiting_data` 超时、`failed`、`cancelled`、平台挂载/调度问题
-- `--train-summary` 会从日志解析 loss/lr 并输出训练趋势，训练完成后依然有效
-- Tensorboard 仅训练中（running 阶段）有效，训练结束后数据流关闭，不再展示
-- `--poll` 会阻塞终端；如果 `waiting_data` 持续超过 10 分钟，脚本会主动拉一次 system log；如果对话不能长期占用终端，就改为周期性运行 `--status`、`--diagnose`、`--logs`、`--train-summary`
-
 ### 训练完成后
 
 运行 `--train-summary` 获取 loss/lr 汇报：
@@ -352,16 +310,7 @@ git push origin master
 
 克隆时用 `--filter=blob:none --no-checkout` + sparse-checkout 只拉 README，跳过 LFS 大文件，速度快且不会因 LFS 报错中断。
 
-**README 模板**（根据实际训练信息自动填充，**禁止保留任何 `{}` 占位符**）：
-
-填写规则（在写入前在内部完成替换）：
-- **模型名称**：用"基座模型简称-领域-用途"命名，如 `ERNIE-0.3B-医疗问答`、`Qwen2.5-7B-客服助手`
-- **一句话介绍**：格式固定为"基于 {base_model}，用 {N} 条 {领域/来源} 数据微调，擅长 {具体能力描述}"
-- **训练框架**：ERNIE 系列 → ERNIEKit；Qwen/LLaMA 等开源模型 → LlamaFactory
-- **训练数据集**：填写 repo_id 并附链接 `https://aistudio.baidu.com/datasetdetail/{DATASET_ID}`
-- **超参数表**：从 `--submit` 时的 `--params` JSON 中提取每个字段的真实值；SFT/LoRA 时额外追加 lora_rank / lora_alpha / lora_dropout 行
-- **训练结果**：从 `--train-summary` 输出中提取起始 Loss 和最终 Loss，计算下降百分比，判断收敛状态（末段 loss 持续下降且稳定 → 正常，末段 loss 波动或不降 → 需关注）
-- **适用场景**：根据训练数据内容和模型命名推断 3-5 个场景，例子：医疗问答模型 → 患者症状咨询、疾病知识普及、用药注意事项查询
+**README 模板**（禁止保留任何 `{}` 占位符；模型名用"基座简称-领域-用途"如 `Qwen2.5-7B-客服助手`；超参从 `--params` JSON 提取；Loss 从 `--train-summary` 提取；适用场景根据数据和模型名推断 3-5 个具体业务动作）：
 
 ```markdown
 ---
@@ -370,80 +319,56 @@ license: Apache License 2.0
 
 ## {模型名称}介绍
 
-{一句话介绍：基于 base_model，用 N 条领域数据微调，擅长具体能力}
+基于 {base_model}，用 {N} 条 {领域} 数据微调，擅长 {具体能力}。
 
-## 模型描述
+## 模型信息
 
 | 项目 | 详情 |
 |------|------|
-| 基座模型 | {base_model 完整名称} |
+| 基座模型 | {base_model} |
 | 训练框架 | {ERNIEKit 或 LlamaFactory} |
 | 训练方式 | {SFT/Full 或 SFT/LoRA} |
 | 训练数据集 | [{repo_id}](https://aistudio.baidu.com/datasetdetail/{DATASET_ID}) |
-| 训练数据规模 | {N} 条问答对 |
-| 语言 | 中文 |
+| 训练数据规模 | {N} 条 |
+| 语言 | {中文 / English} |
 | 开源协议 | Apache License 2.0 |
 
 ### 训练配置
 
 | 超参数 | 值 |
 |--------|-----|
-| num_train_epochs | {实际值} |
-| learning_rate | {实际值} |
-| cutoff_len / max_seq_len | {实际值} |
-| per_device_train_batch_size | {实际值} |
-| bf16 / fp16 | {true/false} |
-（SFT/LoRA 时追加：lora_rank / lora_alpha / lora_dropout 的实际值）
+| num_train_epochs | {值} |
+| learning_rate | {值} |
+| cutoff_len / max_seq_len | {值} |
+| per_device_train_batch_size | {值} |
+| bf16 / fp16 | {值} |
+（SFT/LoRA 时追加 lora_rank / lora_alpha / lora_dropout）
 
 ### 训练结果
 
-- 起始 Loss：{train_summary 中的值} → 最终 Loss：{train_summary 中的值}，下降 {计算百分比}%，收敛{正常/需关注}
+起始 Loss {值} → 最终 Loss {值}，下降 {%}%，收敛{正常/需关注}。
 
-## 期望模型使用方式以及适用范围
+## 适用场景
 
-根据训练数据内容列出 3-5 个具体适用场景（**必须具体到业务动作**，不要写"通用文本生成"此类泛化描述）：
-- 场景 1：{具体任务，如：回答患者关于某类药物的副作用问题}
-- 场景 2：...
-- 场景 3：...
+- {场景 1，如：回答患者用药副作用问题}
+- {场景 2}
+- {场景 3}
 
-### 如何使用
+## 如何使用
 
-#### API 调用
-
-\`\`\`python
+```python
 import requests
-
 resp = requests.post(
     "https://aistudio.baidu.com/llm/lmapi/v1/chat/completions",
-    headers={"Content-Type": "application/json", "Authorization": f"token YOUR_TOKEN"},
-    json={
-        "model": "{REPO_ID}",
-        "messages": [{"role": "user", "content": "你的问题"}]
-    }
+    headers={"Content-Type": "application/json", "Authorization": "token YOUR_TOKEN"},
+    json={"model": "{REPO_ID}", "messages": [{"role": "user", "content": "你的问题"}]}
 )
 print(resp.json()["choices"][0]["message"]["content"])
-\`\`\`
+```
 
-### 代码范例
+## 局限性
 
-{提供一个完整的可运行代码示例}
-
-### 模型局限性以及可能的偏差
-
-{说明 LoRA/Full 的局限、cutoff_len 截断问题、训练数据分布限制等}
-
-### 训练数据介绍
-
-{数据集来源、格式、规模}
-
-### 数据评估及结果
-
-| 指标 | 值 |
-|------|-----|
-| 起始 Loss | {值} |
-| 最终 Loss | {值} |
-| Loss 下降幅度 | {值}% |
-| 训练步数 | {值} 步 |
+{训练数据分布局限、cutoff_len 截断风险、LoRA adapter 依赖基座等}
 ```
 
 #### 第二步：设置模型元信息标签 + 确认公开状态
@@ -506,9 +431,8 @@ curl -X POST https://aistudio.baidu.com/llm/lmapi/v1/chat/completions \
 
 判断标准：
 - 如果模型仓库只有 LoRA adapter 文件，没有完整权重/配置/tokenizer，不能直接按完整模型调用；需要平台完成合并导出，或另走 adapter 加载流程
-- 如果 API 调用成功，说明该 LoRA 任务的产物已经可作为完整模型使用
-- API 可调用只说明当前账号/Token 下产物可用；Skill 的默认目标是公开发布，但是否已经公开展示、是否能被他人访问，需要在 AI Studio 模型库网页端确认发布状态。若仍是私密，要把它作为训练后的待办项明确告诉用户
-- 最终答复用户时要区分“训练任务成功”和“模型产物已实测可用”
+- 如果 API 调用成功，说明产物可作为完整模型使用；但可见性需到模型库网页确认，若仍私密则提醒用户改为公开
+- 最终答复用户时要区分”训练任务成功”和”模型产物已实测可用”
 
 ---
 
