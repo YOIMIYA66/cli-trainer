@@ -75,9 +75,11 @@ bash "$WEB_ACCESS_SKILL_PATH/scripts/check-deps.sh"
 
 ### Token
 
-推荐使用环境变量：
+推荐使用环境变量，但不要把真实 token 直接写进 shell history。交互式输入后再导出：
 ```bash
-export AISTUDIO_ACCESS_TOKEN="your_token_here"                 # 环境变量（推荐）
+read -rsp "AI Studio Access Token: " AISTUDIO_ACCESS_TOKEN
+echo
+export AISTUDIO_ACCESS_TOKEN
 ```
 
 验证：`python3 "$SKILL_PATH/scripts/train.py" --verify-token`
