@@ -75,19 +75,16 @@ bash "$WEB_ACCESS_SKILL_PATH/scripts/check-deps.sh"
 
 ### Token
 
-四种方式（推荐环境变量）：
+推荐使用环境变量：
 ```bash
 export AISTUDIO_ACCESS_TOKEN="your_token_here"                 # 环境变量（推荐）
-python3 "$SKILL_PATH/scripts/train.py" --api-key "your_token_here" --verify-token
-python3 "$SKILL_PATH/scripts/train.py" --env-file .aistudio.env --verify-token  # 文件内容：AISTUDIO_ACCESS_TOKEN=xxx
-aistudio config -t "$AISTUDIO_ACCESS_TOKEN" >/dev/null        # 写入 ~/.cache/aistudio/.auth/token
 ```
 
 验证：`python3 "$SKILL_PATH/scripts/train.py" --verify-token`
 
-如果已用 `aistudio config/login` 配过 token，脚本无环境变量时自动读取 SDK 缓存；环境变量里的过期 token 会覆盖缓存，遇到 401 先检查环境变量。
+如果用户已在本机手工用 `aistudio config/login` 配过 token，脚本无环境变量时自动读取 SDK 缓存；环境变量里的过期 token 会覆盖缓存，遇到 401 先检查环境变量。
 
-**安全要求：不要把 token 作为命令行实参传给第三方 CLI。** 例如避免使用 `aistudio upload ... --token YOUR_TOKEN`，因为部分 CLI 会把完整 argv 打印到终端日志，导致 token 泄漏。上传数据时优先使用 `aistudio_sdk.hub.upload_folder(..., token=os.environ["AISTUDIO_ACCESS_TOKEN"])`，token 只从当前 shell 环境变量读取，不写入文件、notebook、日志或命令历史。若 token 已经出现在聊天、终端输出或日志中，训练结束后提醒用户立即重新生成。
+**安全要求：不要把真实 token 写进命令行实参、URL、文件、notebook、日志或命令历史。** 例如避免使用 `aistudio upload ... --token YOUR_TOKEN`、`python train.py --api-key YOUR_TOKEN` 或 `https://TOKEN:TOKEN@...`，因为这些值可能被完整 argv、remote URL、终端日志或进程列表暴露。上传数据时优先使用 `aistudio_sdk.hub.upload_folder(..., token=os.environ["AISTUDIO_ACCESS_TOKEN"])`，token 只从当前 shell 环境变量或 SDK 缓存读取。若 token 已经出现在聊天、终端输出或日志中，训练结束后提醒用户立即重新生成。
 
 ### 平台运行环境（已验证，2026-05-14）
 
@@ -340,12 +337,25 @@ python3 "$SKILL_PATH/scripts/train.py" --train-summary 训练任务ID
 
 #### 第一步：通过 git 自动推送 README（已验证可行）
 
-AI Studio 模型仓库支持通过 git 推送，用 Access Token 作为密码：
+AI Studio 模型仓库支持通过 git 推送。不要把 token 拼到 remote URL；用 `GIT_ASKPASS` 从环境变量读取凭据：
 
 ```bash
 # 将 REPO_ID 替换为实际仓库路径，如 18610248/train_c8979534
 cd /tmp && rm -rf model_readme_tmp
-git clone "https://$AISTUDIO_ACCESS_TOKEN:$AISTUDIO_ACCESS_TOKEN@git.aistudio.baidu.com/$REPO_ID.git" model_readme_tmp \
+ASKPASS_FILE="$(mktemp)"
+cat > "$ASKPASS_FILE" <<'EOF'
+#!/usr/bin/env sh
+case "$1" in
+  *Username*) printf '%s\n' "$AISTUDIO_ACCESS_TOKEN" ;;
+  *Password*) printf '%s\n' "$AISTUDIO_ACCESS_TOKEN" ;;
+  *) printf '%s\n' "$AISTUDIO_ACCESS_TOKEN" ;;
+esac
+EOF
+chmod 700 "$ASKPASS_FILE"
+trap 'rm -f "$ASKPASS_FILE"' EXIT
+
+GIT_ASKPASS="$ASKPASS_FILE" GIT_TERMINAL_PROMPT=0 \
+git clone "https://git.aistudio.baidu.com/$REPO_ID.git" model_readme_tmp \
   --no-checkout --depth=1 --filter=blob:none 2>&1 | tail -3
 
 cd /tmp/model_readme_tmp
@@ -362,7 +372,7 @@ git config user.email "train@aistudio.baidu.com"
 git config user.name "AI Studio Train"
 git add README.md
 git commit -m "docs: 完善模型卡片 README"
-git push origin master
+GIT_ASKPASS="$ASKPASS_FILE" GIT_TERMINAL_PROMPT=0 git push origin master
 ```
 
 克隆时用 `--filter=blob:none --no-checkout` + sparse-checkout 只拉 README，跳过 LFS 大文件，速度快且不会因 LFS 报错中断。
@@ -475,15 +485,24 @@ Playwright 操作要点（已踩坑）：
 2. 查模型仓库文件，确认至少有 `model.safetensors`、`config.json`、`tokenizer.json`、`tokenizer_config.json`、`generation_config.json` 等直接推理所需文件
 3. 用 AiStudio API 对最终模型仓库做一次最小调用测试，确认 `errorCode: 0` 且能返回正常文本
 
-示例：
-```bash
-curl -X POST https://aistudio.baidu.com/llm/lmapi/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: token $AISTUDIO_ACCESS_TOKEN" \
-  -d '{
-    "model": "gitlogin/model_repo",
-    "messages": [{"role": "user", "content": "1+1等于几？只输出答案。"}]
-  }'
+示例（避免把 token 展开到 `curl` 命令行参数中）：
+```python
+import os
+import requests
+
+resp = requests.post(
+    "https://aistudio.baidu.com/llm/lmapi/v1/chat/completions",
+    headers={
+        "Content-Type": "application/json",
+        "Authorization": f"token {os.environ['AISTUDIO_ACCESS_TOKEN']}",
+    },
+    json={
+        "model": "gitlogin/model_repo",
+        "messages": [{"role": "user", "content": "1+1等于几？只输出答案。"}],
+    },
+    timeout=60,
+)
+print(resp.json())
 ```
 
 判断标准：
@@ -543,7 +562,8 @@ python3 "$SKILL_PATH/scripts/train.py" --cancel JOB_ID  # 取消卡住的任务
 --poll <job_id>                 持续轮询（阻塞终端，对话场景不推荐）
 --cancel <job_id>               取消任务
 
---api-key TOKEN / --env-file FILE / --base-url URL
+--api-key TOKEN / --env-file FILE  仅本地手工调试；自动化流程优先用环境变量
+--base-url URL
 ```
 
 ---
