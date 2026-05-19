@@ -1285,13 +1285,25 @@ def cmd_poll(args: argparse.Namespace) -> None:
 
 # -------------------------------- logs ------------------------ #
 
-def _fetch_job_log(job_id: str, token: str, base_url: str, system: bool = False, byte_limit: int = 409500, soft: bool = False) -> str:
+def _fetch_job_log(
+    job_id: str,
+    token: str,
+    base_url: str,
+    system: bool = False,
+    byte_limit: int = 409500,
+    soft: bool = False,
+    tail: bool = False,
+) -> str:
     log_file = "system.log" if system else "master/output.log"
     url = base_url.rstrip("/") + f"/v1/train/jobs/{job_id}/{log_file}"
+    safe_limit = max(1, int(byte_limit or 409500))
+    byte_range = f"bytes=-{safe_limit}" if tail else f"bytes=0-{safe_limit - 1}"
 
     resp: requests.Response
     try:
-        resp = requests.get(url, headers={**headers(token), "Range": f"bytes=0-{byte_limit}"}, timeout=30)
+        resp = requests.get(url, headers={**headers(token), "Range": byte_range}, timeout=30)
+        if tail and resp.status_code in {400, 416}:
+            resp = requests.get(url, headers={**headers(token), "Range": f"bytes=0-{safe_limit - 1}"}, timeout=30)
     except Exception as e:
         msg = f"获取{'system log' if system else 'stdout 日志'}失败：{e}"
         if soft:
@@ -1534,6 +1546,7 @@ def cmd_export_artifacts(args: argparse.Namespace) -> None:
         system=False,
         byte_limit=args.log_bytes,
         soft=True,
+        tail=True,
     )
     system_log = _fetch_job_log(
         job_id,
@@ -1542,6 +1555,7 @@ def cmd_export_artifacts(args: argparse.Namespace) -> None:
         system=True,
         byte_limit=args.log_bytes,
         soft=True,
+        tail=True,
     )
     _write_text(out_dir / "master_output_raw.log", stdout_log)
     _write_text(out_dir / "system_raw.log", system_log)
@@ -1869,7 +1883,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--train-summary", metavar="JOB_ID", help="训练完成后汇报 loss/lr 趋势")
     p.add_argument("--export-artifacts", metavar="JOB_ID", help="导出 job detail、raw logs、指标 CSV 和曲线图")
     p.add_argument("--out", metavar="DIR", help="输出目录（配合 --export-artifacts）")
-    p.add_argument("--log-bytes", type=int, default=5_000_000, metavar="N", help="导出日志最大字节数（默认 5000000）")
+    p.add_argument("--log-bytes", type=int, default=5_000_000, metavar="N", help="导出最近日志最大字节数（默认 5000000）")
 
     # submit 参数
     p.add_argument("--submit", action="store_true", help="提交训练任务")
