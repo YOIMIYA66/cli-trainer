@@ -254,13 +254,13 @@ python3 "$SKILL_PATH/scripts/train.py" --suggest-params 数据文件.jsonl --mod
 
 ### 命名规范
 
-提交训练前必须主动生成可读名称，避免平台默认产物显示为 `train_xxxxxxxx` 后难以区分。命名应包含模型简称、领域/任务、数据档位或版本，只使用小写字母、数字、下划线。
+提交任何 CLI 训练任务前都必须主动生成可读名称，避免平台默认产物显示为 `train_xxxxxxxx` 后难以区分。命名应包含模型简称、业务领域或任务类型、数据档位或版本，只使用小写字母、数字、下划线。
 
 推荐格式：
-- 任务名 `--name`：`{model_short}_{domain}_{task}_{profile}`，例如 `ernie03b_medical_record_smoke`、`qwen25_7b_customer_qa_v1`
-- 输出仓库 `--output-repo`：`{gitlogin}/{model_short}_{domain}_{task}_{profile}`，例如 `SylvanL/ernie03b_medical_record_smoke`
+- 任务名 `--name`：`{model_short}_{domain_or_task}_{profile}`，例如 `ernie03b_customer_qa_smoke`、`qwen25_7b_finance_summary_v1`、`llama3_legal_review_balanced`
+- 输出仓库 `--output-repo`：`{gitlogin}/{model_short}_{domain_or_task}_{profile}`，例如 `your_gitlogin/ernie03b_customer_qa_smoke`
 
-提交前把建议名称展示给用户确认。若用户没有指定，按训练目标自动起名：从 `base_model` 提取模型简称（如 `ernie03b`、`qwen25_7b`），从数据/任务提取领域和用途（如 `medical_record`、`customer_qa`），从运行档位或文件名提取 `smoke`、`balanced`、`thesis`、`v1`。如果不传 `--output-repo`，训练成功后的模型仓库可能仍由平台命名为 `train_xxxxxxxx`；需要最终模型仓库名可读时，必须传 `--output-repo`，且命名空间要是当前账号可写的真实 `gitlogin`。
+提交前把建议名称展示给用户确认。若用户没有指定，按训练目标自动起名：从 `base_model` 提取模型简称（如 `ernie03b`、`qwen25_7b`），从数据集、文件名或用户目标提取领域/任务（如 `customer_qa`、`finance_summary`、`legal_review`、`medical_record`），从运行档位或版本提取 `smoke`、`balanced`、`thesis`、`v1`。如果不传 `--output-repo`，训练成功后的模型仓库可能仍由平台命名为 `train_xxxxxxxx`；需要最终模型仓库名可读时，必须传 `--output-repo`，且命名空间要是当前账号可写的真实 `gitlogin`。
 
 ### 提交
 
@@ -269,8 +269,8 @@ python3 "$SKILL_PATH/scripts/train.py" --submit \
   --base-model "PaddlePaddle/ERNIE-4.5-0.3B-PT" \
   --train-data "$REPO_ID" \
   --train-file "$TRAIN_FILE" \
-  --name "ernie03b_medical_record_smoke" \
-  --output-repo "SylvanL/ernie03b_medical_record_smoke" \
+  --name "$JOB_NAME" \
+  --output-repo "$OUTPUT_REPO" \
   --params '{"num_train_epochs": 3, "per_device_train_batch_size": 4, "learning_rate": 5e-5, "max_seq_len": 512, "bf16": true}'
 ```
 
