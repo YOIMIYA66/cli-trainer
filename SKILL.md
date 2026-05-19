@@ -264,6 +264,8 @@ python3 "$SKILL_PATH/scripts/train.py" --suggest-params 数据文件.jsonl --mod
 
 ### 提交
 
+默认只传可读任务名，让平台自动创建模型仓库：
+
 ```bash
 JOB_NAME="ernie03b_customer_qa_smoke"              # 按本次训练目标替换
 
@@ -273,9 +275,21 @@ python3 "$SKILL_PATH/scripts/train.py" --submit \
   --train-file "$TRAIN_FILE" \
   --name "$JOB_NAME" \
   --params '{"num_train_epochs": 3, "per_device_train_batch_size": 4, "learning_rate": 5e-5, "max_seq_len": 512, "bf16": true}'
+```
 
-# 如果已经确认目标命名空间可写且仓库名不冲突，再在提交命令中追加：
-#   --output-repo "your_gitlogin/ernie03b_customer_qa_smoke" \
+如果已经确认目标命名空间可写且仓库名不冲突，再显式指定最终模型仓库：
+
+```bash
+JOB_NAME="ernie03b_customer_qa_smoke"              # 按本次训练目标替换
+OUTPUT_REPO="your_gitlogin/ernie03b_customer_qa_smoke"
+
+python3 "$SKILL_PATH/scripts/train.py" --submit \
+  --base-model "PaddlePaddle/ERNIE-4.5-0.3B-PT" \
+  --train-data "$REPO_ID" \
+  --train-file "$TRAIN_FILE" \
+  --name "$JOB_NAME" \
+  --output-repo "$OUTPUT_REPO" \
+  --params '{"num_train_epochs": 3, "per_device_train_batch_size": 4, "learning_rate": 5e-5, "max_seq_len": 512, "bf16": true}'
 ```
 
 注意：
