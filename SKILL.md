@@ -252,6 +252,16 @@ python3 "$SKILL_PATH/scripts/train.py" --suggest-params 数据文件.jsonl --mod
 
 上下文长度要跟目标回答风格联动：短问答/分类/固定格式可用脚本推荐的 `cutoff_len`/`max_seq_len`；如果用户希望模型学习更完整的长解释、长评论或保留热搜详情，优先建议 512。调大长度会增加训练时间和显存占用；出现 OOM 时，先把 `per_device_train_batch_size` 降到 2，再考虑降长度。
 
+### 命名规范
+
+提交训练前必须主动生成可读名称，避免平台默认产物显示为 `train_xxxxxxxx` 后难以区分。命名应包含模型简称、领域/任务、数据档位或版本，只使用小写字母、数字、下划线。
+
+推荐格式：
+- 任务名 `--name`：`{model_short}_{domain}_{task}_{profile}`，例如 `ernie03b_medical_record_smoke`、`qwen25_7b_customer_qa_v1`
+- 输出仓库 `--output-repo`：`{gitlogin}/{model_short}_{domain}_{task}_{profile}`，例如 `SylvanL/ernie03b_medical_record_smoke`
+
+提交前把建议名称展示给用户确认。若用户没有指定，按训练目标自动起名：从 `base_model` 提取模型简称（如 `ernie03b`、`qwen25_7b`），从数据/任务提取领域和用途（如 `medical_record`、`customer_qa`），从运行档位或文件名提取 `smoke`、`balanced`、`thesis`、`v1`。如果不传 `--output-repo`，训练成功后的模型仓库可能仍由平台命名为 `train_xxxxxxxx`；需要最终模型仓库名可读时，必须传 `--output-repo`，且命名空间要是当前账号可写的真实 `gitlogin`。
+
 ### 提交
 
 ```bash
@@ -259,6 +269,8 @@ python3 "$SKILL_PATH/scripts/train.py" --submit \
   --base-model "PaddlePaddle/ERNIE-4.5-0.3B-PT" \
   --train-data "$REPO_ID" \
   --train-file "$TRAIN_FILE" \
+  --name "ernie03b_medical_record_smoke" \
+  --output-repo "SylvanL/ernie03b_medical_record_smoke" \
   --params '{"num_train_epochs": 3, "per_device_train_batch_size": 4, "learning_rate": 5e-5, "max_seq_len": 512, "bf16": true}'
 ```
 
@@ -267,7 +279,8 @@ python3 "$SKILL_PATH/scripts/train.py" --submit \
 - `--train-file` 强烈建议指定；不传时平台会自动选择数据集目录下首个 JSON/JSONL，只有仓库里训练文件唯一且明确时才可省略
 - `--train-file` 的值如果指定，必须和数据集仓库里的实际文件名完全一致（进数据集详情页 → 文件列表确认），写错会导致 `waiting_data` 静默卡住
 - 任务名 `--name` 不能含横杠，只能用字母/数字/下划线
-- 每账号最多 30 个模型仓库，满了用 `--output-repo` 复用已有仓库
+- `--output-repo` 控制最终模型仓库路径；如果省略，平台可能生成 `train_xxxxxxxx` 这类不可读仓库名
+- 每账号最多 30 个模型仓库，满了用 `--output-repo` 复用已有仓库或指定一个已有可写仓库
 - 模型产物默认按“公开发布”处理：如果网页端或接口出现公开/私密选项，除非用户明确要求私密或数据/模型含敏感内容，否则选择公开。若平台训练完成后自动生成的模型仓库仍显示私密，第一时间提醒用户到 AI Studio 模型库页面把可见性改为公开，并补充模型卡片和协议
 - 可视化参数（`report_to`/`visualdl`）由平台后端自动管理，用户传了反而会报"不支持的参数"错误，无需手动传
 
