@@ -87,6 +87,8 @@ aistudio config -t "$AISTUDIO_ACCESS_TOKEN" >/dev/null        # 写入 ~/.cache/
 
 如果已用 `aistudio config/login` 配过 token，脚本无环境变量时自动读取 SDK 缓存；环境变量里的过期 token 会覆盖缓存，遇到 401 先检查环境变量。
 
+**安全要求：不要把 token 作为命令行实参传给第三方 CLI。** 例如避免使用 `aistudio upload ... --token YOUR_TOKEN`，因为部分 CLI 会把完整 argv 打印到终端日志，导致 token 泄漏。上传数据时优先使用 `aistudio_sdk.hub.upload_folder(..., token=os.environ["AISTUDIO_ACCESS_TOKEN"])`，token 只从当前 shell 环境变量读取，不写入文件、notebook、日志或命令历史。若 token 已经出现在聊天、终端输出或日志中，训练结束后提醒用户立即重新生成。
+
 ### 平台运行环境（已验证，2026-05-14）
 
 | 组件 | 版本 | 影响 |
@@ -163,12 +165,17 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data sharegpt_data.jsonl
    - ERNIE 的 `src/tgt` JSONL、LlamaFactory 的 Alpaca/ShareGPT JSONL/JSON 都要检查；训练用 JSON/JSONL 应作为普通文件上传。
    - 如果已经上传成 LFS：删除旧的 LFS 训练文件，或用内容 API 覆盖为普通文件；然后按本上传小节第 4 步 SDK 方案或第 5 步 CLI 方案重新上传。
 
-4. **用 SDK 上传数据集文件夹（推荐）**
+4. **上传前检查普通文件大小**
+   - AI Studio Git 仓库普通文件上传可能拒绝超过 5MB 的 JSON/JSONL；但训练文件又不能改走 LFS，否则训练挂载可能只拿到 LFS 指针或卡在 `waiting_data`。
+   - 如果训练 JSON/JSONL 超过 5MB，先停止上传并向用户说明取舍。可选处理：压缩固定 prompt、裁剪过长上下文、减少 replay、拆分实验档，或确认平台是否支持该任务的多文件训练。
+   - 做过裁剪或 compact 处理时，必须保留 manifest，记录源文件、输出文件、样本数是否变化、截断规则、被截断样本数和原因。不要把 compact 文件伪装成未裁剪的完整数据。
+
+5. **用 SDK 上传数据集文件夹（推荐）**
    - 上传原则见 `references/aistudio_sdk_upload.md`；主规则是：完整 `repo_id`、一仓一数据集、token 只走环境变量、JSON/JSONL 不走 LFS。
    - SDK 日志出现 `201` 和 `Commit part 1 successful!` 才算提交成功；STS 分支的已知回退报错不单独视为失败。
    - 上传后必须继续执行本上传小节第 6 步；不要只看 SDK 上传日志。
 
-5. **用 CLI 上传单个训练文件（备选）**
+6. **用 CLI 上传单个训练文件（备选）**
    ```bash
    AISTUDIO_CLI="${AISTUDIO_CLI:-$(python3 -m site --user-base)/bin/aistudio}"
    [ -x "$AISTUDIO_CLI" ] || AISTUDIO_CLI="$(command -v aistudio)"
@@ -176,10 +183,11 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data sharegpt_data.jsonl
    TRAIN_FILE="$(basename "$LOCAL_FILE")"     # 仓库内文件名，提交训练时 --train-file 也用它
    "$AISTUDIO_CLI" upload "$REPO_ID" "$LOCAL_FILE" "$TRAIN_FILE" --repo-type dataset
    ```
+   只有确认当前 CLI 不会打印完整 argv 时才使用备选方案；不要附加 `--token TOKEN`，token 仍应走环境变量或 SDK 缓存。
    `REPO_ID` 必须是详情页显示的完整 `repo_id`。如果出现 `preupload` 404，回到本上传小节第 2 步确认仓库已存在且路径无误。
    上传命令成功返回后，必须立刻主动告诉用户：训练文件已上传到哪个 `repo_id`、仓库内文件名是什么、接下来会做 `is_lfs` 和下载回验；不要等到提交训练后才暴露上传问题。
 
-6. **验证上传结果**
+7. **验证上传结果**
    ```bash
    python3 "$SKILL_PATH/scripts/train.py" \
      --verify-upload \
@@ -195,7 +203,7 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data sharegpt_data.jsonl
    - 文件大小：仓库大小与本地大小是否一致或接近
    - 下一步将使用的提交参数：`--train-data "$REPO_ID" --train-file "$TRAIN_FILE"`
 
-7. **卡在 `waiting_data` 时按顺序排查**
+8. **卡在 `waiting_data` 时按顺序排查**
    - `REPO_ID` 是否来自详情页，`gitlogin` 是否真实可写
    - `--train-file` 是否和仓库内文件名完全一致
    - 训练文件是否 `is_lfs:false`，大小是否接近本地文件
@@ -218,7 +226,7 @@ python3 "$SKILL_PATH/scripts/train.py" --suggest-params 数据文件.jsonl --mod
 | `per_device_train_batch_size` | int | 4 | 每步样本数，OOM 就调小到 2 |
 | `learning_rate` | float | 5e-5 | 学习率，新手一般不用改 |
 | `max_seq_len` | int | 512 | 最大序列长度，超过截断 |
-| `max_steps` | int | -1 | -1 表示由 epochs 控制；设正数则固定步数 |
+| `max_steps` | int | -1 | -1 表示由 epochs 控制；不传时平台可能使用默认固定步数，导致 epochs 没有按预期跑满 |
 | `warmup_steps` | int | 50 | 预热步数，约总步数的 5-10% |
 | `logging_steps` | int | 5 | 每几步打一次日志 |
 | `bf16` | bool | true | 混合精度，节省显存 |
@@ -305,7 +313,7 @@ python3 "$SKILL_PATH/scripts/train.py" --logs JOB_ID --system  # 单独查 syste
 - `--logs` 查 stdout 是最可靠的 loss 监控方式，ERNIE/LlamaFactory 都支持
 - `--diagnose` 是异常排查首选，会主动拉 system log；用于 `waiting_data` 超时、`failed`、`cancelled`、平台挂载/调度问题
 - `--train-summary` 会从日志解析 loss/lr 并输出训练趋势，训练完成后依然有效
-- Tensorboard 仅训练中（running 阶段）有效，训练结束后数据流关闭，不再展示
+- Tensorboard 仅训练中（running 阶段）最可靠；训练结束后可能显示 `INACTIVE`，也可能出现能列出 scalar tag 但曲线不渲染。不要把 Tensorboard 作为唯一验收依据，优先以 raw log、`--train-summary` 和本地导出的 CSV/PNG 曲线为准
 - `--poll` 会阻塞终端；对话场景不能长期占用终端时，改为周期性运行 `--status`、`--diagnose`、`--logs`、`--train-summary`
 
 ### 训练完成后
@@ -314,6 +322,19 @@ python3 "$SKILL_PATH/scripts/train.py" --logs JOB_ID --system  # 单独查 syste
 ```bash
 python3 "$SKILL_PATH/scripts/train.py" --train-summary 训练任务ID
 ```
+
+训练 `succeeded` 后，先完成训练证据归档，再处理模型卡片与可见性。
+
+**训练证据归档清单：**
+- `job_detail.json`：最终任务状态、模型仓库、Tensorboard/log URL
+- `master_output_raw.log`：stdout 原始训练日志
+- `system_raw.log`：系统日志，用于排查数据挂载/调度
+- `train_summary.txt`：`--train-summary` 输出
+- `loss_curve.csv`：从 raw log 解析出的 step/loss/lr/ppl 等指标
+- `loss_curve.png`、`learning_rate_curve.png`、`training_curves.png`：本地曲线图
+- `README.md`：记录 jobId、模型仓库、数据集、训练文件、超参、loss 摘要、Tensorboard 是否可用、任何 compact/截断处理
+
+如果 Tensorboard 页面不可读，但 raw log 能解析出 loss/lr，训练证据仍然成立。最终回复用户时应区分“训练任务成功”和“模型效果已通过推理验收”。
 
 训练 `succeeded` 后，**必须自动完成以下两步，不要等用户提醒**：
 
