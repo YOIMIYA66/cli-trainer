@@ -155,7 +155,7 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data sharegpt_data.jsonl
 
 2. **创建或确认数据集仓库**
    - 在 `https://aistudio.baidu.com/my/dataset` 创建或打开数据集仓库。新建时英文 ID 用小写字母、数字、下划线；可见性按页面默认公开处理，除非用户明确要求私密或数据含隐私。
-   - 创建表单里的开源协议要选一个（例如 `CC0`）；公开数据集必须选择，不选时可能点击创建但没有明显报错。
+   - 创建表单里的开源协议必须选择一个，公开数据集不选则可能无报错地创建失败。协议选择依据用户实际需求：允许商用且无特殊限制时选 **Apache 2.0**（AI Studio 开源模型和数据集最常见的默认选项）；数据来自受限来源或有归因要求时选 **CC BY 4.0**；有其他合规要求时按需选择，不要替用户默认选定。
    - 创建或打开仓库后，从详情页读取完整 `repo_id`，形如 `gitlogin/repo_name`。不要用昵称、展示名、登录用户名或邮箱猜 `gitlogin`。
    - `aistudio upload` / `aistudio_sdk.hub.upload_file` 只上传到已有数据集仓库，不会自动创建 dataset repo。如果上传时报 `preupload` 404，优先检查仓库是否已在网页端创建、`repo_id` 是否来自详情页、token 是否对该仓库有写权限、仓库类型是否为 dataset。
    - 如果传 `--output-repo`，斜杠前半段必须和当前账号可写的 `gitlogin` 匹配。
