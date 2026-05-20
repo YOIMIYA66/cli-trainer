@@ -13,9 +13,9 @@
   train.py --open-tb <job_id>                    running 后打开 Tensorboard
   train.py --logs <job_id> [--system]            查看日志
   train.py --diagnose <job_id>                   主动诊断状态、system log 和 stdout
-  train.py --generate-dataset-readme FILE --train-data REPO_ID --train-file F --out README.md
+  train.py --generate-dataset-readme FILE --train-data REPO_ID --train-file F --readme-out README.md
                                                 生成数据集 README
-  train.py --generate-model-readme JOB_ID --out README.md
+  train.py --generate-model-readme JOB_ID --readme-out README.md
                                                 生成模型 README
   train.py --push-readme REPO_ID --readme-file README.md
                                                 上传 README.md 到 AI Studio Git 仓库
@@ -1118,7 +1118,7 @@ python3 scripts/train.py --submit \\
 - 如果包含医疗、法律、金融等专业内容，模型输出只能作为辅助参考，不应替代专业判断。
 - 如果训练文件来自公开数据集或二次处理数据，请确认原始数据许可允许再发布和模型训练。
 """
-    _write_text(Path(args.out or "README.md"), content)
+    _write_text(Path(args.readme_out or "README.md"), content)
 
 
 def _soft_fetch_log(job_id: str, token: str, base_url: str) -> str:
@@ -1218,7 +1218,7 @@ TensorBoard 如可访问，优先查看 `Scalars` 面板中的 loss/lr 曲线；
 - 如果训练样本较少，可能出现过拟合或只记住模板的情况。
 - 专业领域输出需要人工审核，不应替代专业判断。
 """
-    _write_text(Path(args.out or "README.md"), content)
+    _write_text(Path(args.readme_out or "README.md"), content)
 
 
 def _git_content_optional(repo_id: str, file_path: str, token: str, ref: str = "master") -> dict | None:
@@ -1262,19 +1262,31 @@ def cmd_push_readme(args: argparse.Namespace) -> None:
     path_in_repo = args.path_in_repo or "README.md"
     content = readme_path.read_bytes()
     old = _git_content_optional(repo_id, path_in_repo, token)
+    if old and not args.overwrite:
+        sha = old.get("sha", "unknown")
+        html_url = old.get("html_url") or f"https://git.aistudio.baidu.com/{repo_id}/src/branch/master/{path_in_repo}"
+        die(
+            f"{repo_id}/{path_in_repo} 已存在，默认不会覆盖已有 README。\n"
+            f"现有文件 sha：{sha}\n"
+            f"文件页：{html_url}\n"
+            "请先合并用户已有内容，确认要覆盖时再加 --overwrite。"
+        )
+
     payload: dict[str, Any] = {
         "message": args.commit_message or f"docs: update {path_in_repo}",
         "content": base64.b64encode(content).decode("ascii"),
         "branch": "master",
     }
+    method = "POST"
     if old and old.get("sha"):
         payload["sha"] = old["sha"]
+        method = "PUT"
 
     repo = quote(repo_id.strip().strip("/"), safe="/")
     path = quote(path_in_repo.strip().strip("/"), safe="/")
     url = f"{GIT_BASE_URL}/api/v1/repos/{repo}/contents/{path}"
     try:
-        resp = requests.put(url, headers={"Authorization": f"token {token}"}, json=payload, timeout=60)
+        resp = requests.request(method, url, headers={"Authorization": f"token {token}"}, json=payload, timeout=60)
     except requests.RequestException as e:
         die(f"上传 README 失败：{e}")
         return
@@ -1989,12 +2001,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--generate-model-readme", metavar="JOB_ID", help="根据训练任务生成模型 README")
     p.add_argument("--push-readme", metavar="REPO_ID", help="上传 README.md 到指定 AI Studio Git 仓库")
     p.add_argument("--readme-file", metavar="FILE", help="README 文件路径（配合 --push-readme）")
-    p.add_argument("--out", metavar="FILE", help="输出文件路径（配合 --generate-*-readme）")
+    p.add_argument("--readme-out", metavar="FILE", help="README 输出路径（配合 --generate-*-readme）")
     p.add_argument("--title", metavar="TITLE", help="README 标题")
     p.add_argument("--license", metavar="LICENSE", help="README frontmatter license，默认 Apache License 2.0")
     p.add_argument("--dataset-source", metavar="TEXT", help="数据来源说明（配合 --generate-dataset-readme）")
     p.add_argument("--path-in-repo", metavar="PATH", default="README.md", help="仓库内 README 路径（默认 README.md）")
     p.add_argument("--commit-message", metavar="MSG", help="上传 README 的提交信息")
+    p.add_argument("--overwrite", action="store_true", help="配合 --push-readme：允许覆盖仓库中已有 README")
     p.add_argument("--cancel", metavar="JOB_ID", help="取消任务")
     p.add_argument("--open-tb", metavar="JOB_ID", help="任务 running 后打开 Tensorboard")
     p.add_argument("--train-summary", metavar="JOB_ID", help="训练完成后汇报 loss/lr 趋势")

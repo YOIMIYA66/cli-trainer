@@ -202,7 +202,7 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data sharegpt_data.jsonl
      --generate-dataset-readme "$LOCAL_FILE" \
      --train-data "$REPO_ID" \
      --train-file "$TRAIN_FILE" \
-     --out dataset_README.md \
+     --readme-out dataset_README.md \
      --title "$REPO_ID"
 
    python3 "$SKILL_PATH/scripts/train.py" \
@@ -210,7 +210,7 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data sharegpt_data.jsonl
      --readme-file dataset_README.md \
      --commit-message "docs: add dataset README"
    ```
-   如果 README 已存在，先避免覆盖用户手写的重要内容；可以生成到本地让用户确认，或把自动生成内容合并后再 `--push-readme`。
+   `--push-readme` 默认只创建新 README；如果 README 已存在，会拒绝覆盖。先把用户手写内容合并到本地 README，确认要替换时再加 `--overwrite`。
 
 8. **卡在 `waiting_data` 时按顺序排查**
    - `REPO_ID` 是否来自详情页，`gitlogin` 是否真实可写
@@ -348,7 +348,7 @@ python3 "$SKILL_PATH/scripts/train.py" \
   --train-data "$REPO_ID" \
   --train-file "$TRAIN_FILE" \
   --params "$CONFIRMED_PARAMS" \
-  --out model_README.md \
+  --readme-out model_README.md \
   --title "$MODEL_REPO"
 
 python3 "$SKILL_PATH/scripts/train.py" \
@@ -357,7 +357,7 @@ python3 "$SKILL_PATH/scripts/train.py" \
   --commit-message "docs: add model README"
 ```
 
-生成的 README 不能保留占位符；如果用户有项目说明、论文链接、评测截图或推理示例，合并到 `model_README.md` 后再上传。若目标仓库已有 README，避免直接覆盖用户手写内容。
+生成的 README 不能保留占位符；如果用户有项目说明、论文链接、评测截图或推理示例，合并到 `model_README.md` 后再上传。`--push-readme` 默认拒绝覆盖已有 README；确认已经合并并需要替换时，再显式追加 `--overwrite`。
 
 #### 第二步：设置模型元信息标签 + 确认公开状态
 
@@ -470,12 +470,12 @@ python3 "$SKILL_PATH/scripts/train.py" --cancel JOB_ID  # 取消卡住的任务
 --status <job_id>               查看任务状态
 --logs <job_id> [--system]      查看训练日志（stdout loss）
 --diagnose <job_id>             主动诊断状态、system log 和 stdout
---generate-dataset-readme FILE --train-data REPO_ID --train-file F --out README.md
+--generate-dataset-readme FILE --train-data REPO_ID --train-file F --readme-out README.md
                                  根据本地训练文件生成数据集 README
---generate-model-readme JOB_ID --out README.md
+--generate-model-readme JOB_ID --readme-out README.md
                                  根据训练任务状态和日志生成模型 README
 --push-readme REPO_ID --readme-file README.md
-                                 上传 README.md 到 AI Studio Git 仓库
+                                 上传 README.md 到 AI Studio Git 仓库；已有 README 时需加 --overwrite
 --train-summary <job_id>         训练完成后汇报 loss/lr 趋势和健康状态
 --poll <job_id>                 持续轮询（阻塞终端，对话场景不推荐）
 --cancel <job_id>               取消任务
