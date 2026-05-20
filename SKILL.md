@@ -363,12 +363,12 @@ python3 "$SKILL_PATH/scripts/train.py" --train-summary 训练任务ID
 
 训练 `succeeded` 后，**必须自动完成以下两步，不要等用户提醒**：
 
-#### 第一步：通过 git 自动推送 README（已验证可行）
+#### 第一步：通过 git 自动推送 README
 
 AI Studio 模型仓库支持通过 git 推送。不要把 token 拼到 remote URL；用 `GIT_ASKPASS` 从环境变量读取凭据：
 
 ```bash
-# 将 REPO_ID 替换为实际仓库路径，如 18610248/train_c8979534
+# REPO_ID 示例：yunlin/qwen25_05b_self_cognition_smoke
 cd /tmp && rm -rf model_readme_tmp
 ASKPASS_FILE="$(mktemp)"
 cat > "$ASKPASS_FILE" <<'EOF'
@@ -391,21 +391,19 @@ git sparse-checkout init --cone
 git sparse-checkout set README.md
 git checkout
 
-# 写入 README（见下方模板，按实际训练信息填充）
-cat > README.md << 'EOF'
-...内容见下方模板...
-EOF
+# 写入 README，内容按 model-card-spec.md 生成（见下文）
+cat > README.md << 'READMEEOF'
+...按 model-card-spec.md 填充，不留占位符...
+READMEEOF
 
-git config user.email "train@aistudio.baidu.com"
-git config user.name "AI Studio Train"
+git config user.email "$GIT_USER_EMAIL"   # 替换为真实邮箱，或用 git global config
+git config user.name "liuyunlin"
 git add README.md
 git commit -m "docs: 完善模型卡片 README"
 GIT_ASKPASS="$ASKPASS_FILE" GIT_TERMINAL_PROMPT=0 git push origin master
 ```
 
-克隆时用 `--filter=blob:none --no-checkout` + sparse-checkout 只拉 README，跳过 LFS 大文件，速度快且不会因 LFS 报错中断。
-
-**Model Card 内容按 `$SKILL_PATH/references/model-card-spec.md` 生成。** 读取该文件，根据实际训练数据填充各字段；无法从训练配置、日志或数据集元数据获取的字段，直接省略对应行/句/节，不留任何占位符。完整字段规范、命名规则和示例见 spec 文件。
+**Model Card 内容按 `$SKILL_PATH/references/model-card-spec.md` 生成。** 读取该文件，根据实际训练数据填充各字段；无法获取的字段直接省略，不留占位符。
 
 #### 第二步：设置模型元信息标签 + 确认公开状态
 
