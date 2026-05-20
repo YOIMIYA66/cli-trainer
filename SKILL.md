@@ -260,7 +260,7 @@ python3 "$SKILL_PATH/scripts/train.py" --suggest-params 数据文件.jsonl --mod
 - 任务名 `--name`：`{model_short}_{domain_or_task}_{profile}`，例如 `ernie03b_customer_qa_smoke`、`qwen25_7b_finance_summary_v1`、`llama3_legal_review_balanced`
 - 输出仓库 `--output-repo`：`{gitlogin}/{model_short}_{domain_or_task}_{profile}`，例如 `your_gitlogin/ernie03b_customer_qa_smoke`
 
-提交前把建议名称展示给用户确认。若用户没有指定，按训练目标自动起名：从 `base_model` 提取模型简称（如 `ernie03b`、`qwen25_7b`），从数据集、文件名或用户目标提取领域/任务（如 `customer_qa`、`finance_summary`、`legal_review`、`medical_record`），从运行档位或版本提取 `smoke`、`balanced`、`thesis`、`v1`。如果不传 `--output-repo`，训练成功后的模型仓库可能仍由平台命名为 `train_xxxxxxxx`；需要最终模型仓库名可读时，才建议传 `--output-repo`。传入前必须确认该 `gitlogin/repo` 属于当前账号可写命名空间，且没有和不相关的已有模型仓库冲突；不确定时只传 `--name`，训练完成后再补充模型卡片和 README。
+提交前把建议名称展示给用户确认。若用户没有指定，按训练目标自动起名：从 `base_model` 提取模型简称（如 `ernie03b`、`qwen25_7b`），从数据集、文件名或用户目标提取领域/任务（如 `customer_qa`、`finance_summary`、`legal_review`、`medical_record`），从运行档位或版本提取 `smoke`、`balanced`、`thesis`、`v1`。`--name` 只控制训练任务名，不保证最终模型仓库名；如果不传 `--output-repo`，训练成功后的模型仓库可能仍由平台命名为 `train_xxxxxxxx`。需要最终模型仓库名可读时，必须显式传 `--output-repo`。传入前必须确认该 `gitlogin/repo` 属于当前账号可写命名空间，且没有和不相关的已有模型仓库冲突；不确定时只传 `--name`，训练完成后再补充模型卡片和 README。
 
 ### 提交
 
@@ -276,6 +276,8 @@ python3 "$SKILL_PATH/scripts/train.py" --submit \
   --name "$JOB_NAME" \
   --params '{"num_train_epochs": 3, "per_device_train_batch_size": 4, "learning_rate": 5e-5, "max_seq_len": 512, "bf16": true}'
 ```
+
+这个模式只保证任务列表里的名称可读；最终模型仓库仍可能是平台生成的 `train_xxxxxxxx`。如果用户明确要求模型仓库名也可读，使用下一段 `--output-repo` 示例。
 
 如果已经确认目标命名空间可写且仓库名不冲突，再显式指定最终模型仓库：
 
@@ -297,7 +299,7 @@ python3 "$SKILL_PATH/scripts/train.py" --submit \
 - `--train-file` 强烈建议指定；不传时平台会自动选择数据集目录下首个 JSON/JSONL，只有仓库里训练文件唯一且明确时才可省略
 - `--train-file` 的值如果指定，必须和数据集仓库里的实际文件名完全一致（进数据集详情页 → 文件列表确认），写错会导致 `waiting_data` 静默卡住
 - 任务名 `--name` 不能含横杠，只能用字母/数字/下划线
-- `--output-repo` 控制最终模型仓库路径；如果省略，平台可能生成 `train_xxxxxxxx` 这类不可读仓库名
+- `--name` 只控制训练任务名；`--output-repo` 才控制最终模型仓库路径。如果省略 `--output-repo`，平台可能生成 `train_xxxxxxxx` 这类不可读仓库名
 - `--output-repo` 不是必填项；只有确认目标命名空间可写、仓库名未和无关模型冲突时才传，不确定时先省略
 - 每账号最多 30 个模型仓库，满了用 `--output-repo` 复用已有仓库或指定一个已有可写仓库
 - 模型产物默认按“公开发布”处理：如果网页端或接口出现公开/私密选项，除非用户明确要求私密或数据/模型含敏感内容，否则选择公开。若平台训练完成后自动生成的模型仓库仍显示私密，第一时间提醒用户到 AI Studio 模型库页面把可见性改为公开，并补充模型卡片和协议
