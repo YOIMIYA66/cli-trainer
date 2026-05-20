@@ -946,13 +946,18 @@ def cmd_verify_upload(args: argparse.Namespace) -> None:
     print("-" * 55)
 
     if is_lfs is not False:
-        die(
-            "训练文件不是普通 JSON/JSONL（is_lfs 不是 false）。\n"
-            "请到数据集文件页编辑 .gitattributes，删除训练文件扩展名对应的 LFS 规则，"
-            "再删除旧训练文件并重新上传。"
+        msg = (
+            "训练文件 is_lfs:true。推荐修复为普通 JSON/JSONL（is_lfs:false），"
+            "这样下载回验和 waiting_data 排查更可靠；实测部分 LFS 文件也可能训练成功。"
         )
-
-    if local_size is not None and isinstance(size, int) and local_size != size:
+        if getattr(args, "strict_lfs", False):
+            die(
+                msg + "\n"
+                "请到数据集文件页编辑 .gitattributes，删除训练文件扩展名对应的 LFS 规则，"
+                "再删除旧训练文件并重新上传；或确认风险后去掉 --strict-lfs。"
+            )
+        print(f"[!]  {msg}")
+    elif local_size is not None and isinstance(size, int) and local_size != size:
         print("[!]  仓库文件大小与本地文件不一致，请下载回本地后再跑 --check-data 确认内容。")
     else:
         print("[OK] 上传完成，训练文件是普通文件（is_lfs:false）。")
@@ -960,6 +965,8 @@ def cmd_verify_upload(args: argparse.Namespace) -> None:
     print("\n提交训练时使用：")
     print(f"  --train-data {args.train_data}")
     print(f"  --train-file {args.train_file}")
+    if is_lfs is not False:
+        print("  # 注意：当前训练文件 is_lfs:true。若后续卡在 waiting_data，先修复 LFS 后重提。")
     print()
 
 
@@ -1292,18 +1299,16 @@ def _fetch_job_log(
     system: bool = False,
     byte_limit: int = 409500,
     soft: bool = False,
-    tail: bool = False,
 ) -> str:
     log_file = "system.log" if system else "master/output.log"
     url = base_url.rstrip("/") + f"/v1/train/jobs/{job_id}/{log_file}"
     safe_limit = max(1, int(byte_limit or 409500))
-    byte_range = f"bytes=-{safe_limit}" if tail else f"bytes=0-{safe_limit - 1}"
+    # AI Studio 日志接口不支持 suffix range（bytes=-N），只支持 bytes=start-end。
+    byte_range = f"bytes=0-{safe_limit - 1}"
 
     resp: requests.Response
     try:
         resp = requests.get(url, headers={**headers(token), "Range": byte_range}, timeout=30)
-        if tail and resp.status_code in {400, 416}:
-            resp = requests.get(url, headers={**headers(token), "Range": f"bytes=0-{safe_limit - 1}"}, timeout=30)
     except Exception as e:
         msg = f"获取{'system log' if system else 'stdout 日志'}失败：{e}"
         if soft:
@@ -1546,7 +1551,6 @@ def cmd_export_artifacts(args: argparse.Namespace) -> None:
         system=False,
         byte_limit=args.log_bytes,
         soft=True,
-        tail=True,
     )
     system_log = _fetch_job_log(
         job_id,
@@ -1555,7 +1559,6 @@ def cmd_export_artifacts(args: argparse.Namespace) -> None:
         system=True,
         byte_limit=args.log_bytes,
         soft=True,
-        tail=True,
     )
     _write_text(out_dir / "master_output_raw.log", stdout_log)
     _write_text(out_dir / "system_raw.log", system_log)
@@ -1866,6 +1869,7 @@ def build_parser() -> argparse.ArgumentParser:
     # 子命令
     p.add_argument("--verify-token", action="store_true", help="验证 Access Token 是否有效")
     p.add_argument("--verify-upload", action="store_true", help="验证数据集上传结果并打印回执")
+    p.add_argument("--strict-lfs", action="store_true", help="配合 --verify-upload：is_lfs 不是 false 时直接失败")
     p.add_argument("--list-models", action="store_true", help="列出平台白名单中所有可用模型")
     p.add_argument("--list-datasets", action="store_true", help="列出内置推荐数据集（不用自己准备数据）")
     p.add_argument("--check-data", metavar="FILE", help="检查数据格式")
@@ -1883,7 +1887,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--train-summary", metavar="JOB_ID", help="训练完成后汇报 loss/lr 趋势")
     p.add_argument("--export-artifacts", metavar="JOB_ID", help="导出 job detail、raw logs、指标 CSV 和曲线图")
     p.add_argument("--out", metavar="DIR", help="输出目录（配合 --export-artifacts）")
-    p.add_argument("--log-bytes", type=int, default=5_000_000, metavar="N", help="导出最近日志最大字节数（默认 5000000）")
+    p.add_argument("--log-bytes", type=int, default=5_000_000, metavar="N", help="导出日志最大字节数（默认 5000000；AI Studio 日志接口使用 bytes=0-N）")
 
     # submit 参数
     p.add_argument("--submit", action="store_true", help="提交训练任务")
