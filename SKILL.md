@@ -31,7 +31,7 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data my_data.jsonl
 2. **鉴权** — 确认有 Access Token，没有就引导去 https://aistudio.baidu.com/account/accessToken 获取
 3. **选模型** — 运行 `--list-models` 展示白名单，让用户选，不要让用户自己猜名称
 4. **验数据** — 运行 `--check-data` 检查格式，提前发现错误
-5. **准备/上传数据集** — 只能访问 AiStudio 新版 Git 仓库型数据集，不支持外部 URL。创建仓库时先确认真实 `gitlogin`；用 Playwright MCP 或 `web-access` skill 创建仓库并拿到真实 `repo_id`；上传前删除 `.gitattributes` 中的 LFS 规则，上传后确认 `is_lfs: false`。
+5. **准备/上传数据集** — 只能访问 AiStudio 新版 Git 仓库型数据集，不支持外部 URL。创建仓库时先确认真实 `gitlogin`；用 Playwright MCP 或 `web-access` skill 创建仓库并拿到真实 `repo_id`；上传前优先删除 `.gitattributes` 中的 JSON/JSONL LFS 规则，上传后记录 `is_lfs` 状态并确认文件大小。
 6. **推荐超参** — 运行 `--suggest-params`，展示结果，**等用户确认后才提交**
 7. **提交训练** — 运行 `--submit`，拿到 jobId
 8. **监控训练** — 提交后运行 `--poll JOB_ID`；任务进入 running 且接口返回 `tensorboardUrl` 后自动打开 Tensorboard
@@ -157,20 +157,21 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data sharegpt_data.jsonl
    - 在 `https://aistudio.baidu.com/my/dataset` 创建或打开数据集仓库。新建时英文 ID 用小写字母、数字、下划线；可见性按页面默认公开处理，除非用户明确要求私密或数据含隐私。
    - 创建表单里的开源协议要选一个（例如 `CC0`）；公开数据集必须选择，不选时可能点击创建但没有明显报错。
    - 创建或打开仓库后，从详情页读取完整 `repo_id`，形如 `gitlogin/repo_name`。不要用昵称、展示名、登录用户名或邮箱猜 `gitlogin`。
+   - `aistudio upload` / `aistudio_sdk.hub.upload_file` 只上传到已有数据集仓库，不会自动创建 dataset repo。如果上传时报 `preupload` 404，优先检查仓库是否已在网页端创建、`repo_id` 是否来自详情页、token 是否对该仓库有写权限、仓库类型是否为 dataset。
    - 如果传 `--output-repo`，斜杠前半段必须和当前账号可写的 `gitlogin` 匹配。
 
 3. **上传前处理 JSON/JSONL 的 LFS 规则**
    - 预防优先：新仓库创建后、上传训练文件前，进入数据集详情页 → 文件列表 → `.gitattributes` → 编辑，删除训练文件扩展名对应的 LFS 规则，例如 `*.jsonl filter=lfs ...` 或 `*.json filter=lfs ...`，然后保存。
-   - ERNIE 的 `src/tgt` JSONL、LlamaFactory 的 Alpaca/ShareGPT JSONL/JSON 都要检查；训练用 JSON/JSONL 应作为普通文件上传。
-   - 如果已经上传成 LFS：删除旧的 LFS 训练文件，或用内容 API 覆盖为普通文件；然后按本上传小节第 4 步 SDK 方案或第 5 步 CLI 方案重新上传。
+   - ERNIE 的 `src/tgt` JSONL、LlamaFactory 的 Alpaca/ShareGPT JSONL/JSON 都要检查；训练用 JSON/JSONL 推荐作为普通文件上传，便于下载回验和排查。
+   - 如果已经上传成 LFS：不要直接判定训练必然失败。已实测部分 `is_lfs:true` 文件也可能被 AI Studio 成功挂载并完成训练；但它会降低可回验性，也会让 `waiting_data` 排查更困难。若任务卡在 `waiting_data`，优先删除旧 LFS 训练文件、移除 `.gitattributes` 中 JSON/JSONL LFS 规则，然后按本上传小节第 5 步 SDK 方案或第 6 步 CLI 方案重新上传。
 
 4. **上传前检查普通文件大小**
-   - AI Studio Git 仓库普通文件上传可能拒绝超过 5MB 的 JSON/JSONL；但训练文件又不能改走 LFS，否则训练挂载可能只拿到 LFS 指针或卡在 `waiting_data`。
+   - AI Studio Git 仓库普通文件上传可能拒绝超过 5MB 的 JSON/JSONL；不要为了绕过大小限制默认改走 LFS。优先 compact/crop/split，并保留 manifest；如果最终只能走 LFS，要在回执里明确记录 `is_lfs:true` 风险。
    - 如果训练 JSON/JSONL 超过 5MB，先停止上传并向用户说明取舍。可选处理：压缩固定 prompt、裁剪过长上下文、减少 replay、拆分实验档，或确认平台是否支持该任务的多文件训练。
    - 做过裁剪或 compact 处理时，必须保留 manifest，记录源文件、输出文件、样本数是否变化、截断规则、被截断样本数和原因。不要把 compact 文件伪装成未裁剪的完整数据。
 
 5. **用 SDK 上传数据集文件夹（推荐）**
-   - 上传原则见 `references/aistudio_sdk_upload.md`；主规则是：完整 `repo_id`、一仓一数据集、token 只走环境变量、JSON/JSONL 不走 LFS。
+   - 上传原则见 `references/aistudio_sdk_upload.md`；主规则是：完整 `repo_id`、一仓一数据集、token 只走环境变量、JSON/JSONL 优先不走 LFS。
    - SDK 日志出现 `201` 和 `Commit part 1 successful!` 才算提交成功；STS 分支的已知回退报错不单独视为失败。
    - 上传后必须继续执行本上传小节第 6 步；不要只看 SDK 上传日志。
 
@@ -194,18 +195,18 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data sharegpt_data.jsonl
      --train-file "$TRAIN_FILE" \
      --local-file "$LOCAL_FILE"
    ```
-   验证标准：`is_lfs: false`，文件大小接近本地文件，下载回来后 `--check-data` 通过。不要只看 CLI 显示 `Finished uploading`。
+   验证标准：文件大小接近本地文件，下载回来后 `--check-data` 通过；推荐 `is_lfs:false`。如果 `is_lfs:true`，不要直接隐瞒或继续静默提交，必须提示风险：本项目 smoke 实测 LFS 也可能训练成功，但若任务卡 `waiting_data` 应优先修复 LFS。
    验证通过后必须再主动给用户一个上传完成回执，至少包含：
    - 数据集：`REPO_ID`
    - 训练文件：`TRAIN_FILE`
-   - LFS 状态：`is_lfs:false`
+   - LFS 状态：`is_lfs:false`（推荐）或 `is_lfs:true` 风险说明
    - 文件大小：仓库大小与本地大小是否一致或接近
    - 下一步将使用的提交参数：`--train-data "$REPO_ID" --train-file "$TRAIN_FILE"`
 
 8. **卡在 `waiting_data` 时按顺序排查**
    - `REPO_ID` 是否来自详情页，`gitlogin` 是否真实可写
    - `--train-file` 是否和仓库内文件名完全一致
-   - 训练文件是否 `is_lfs:false`，大小是否接近本地文件
+   - 训练文件大小是否接近本地文件；若 `is_lfs:true`，优先修复为普通 JSON/JSONL 后重试
    - 下载回本地后 `--check-data` 是否通过
    - 如果新 commit 和新 `mount Job` 仍循环“正在等待数据集下载完成...”，通常是平台挂载任务卡住；停止反复重传，保留 jobId、repo_id、commitId、mount Job 和上传校验结果给平台排查。
 
@@ -296,7 +297,7 @@ python3 "$SKILL_PATH/scripts/train.py" --open-tb JOB_ID
 - `running`：报告进度、当前 loss，并用 `--train-summary JOB_ID` 解读 loss 趋势
 - `succeeded`：运行 `--train-summary JOB_ID` 汇报最终 loss、模型仓库和测试建议
 - `failed/cancelled`：必须主动运行 `--diagnose JOB_ID`，结合 system log 说明失败原因
-- `waiting_data` 超过 10 分钟：必须主动运行 `--diagnose JOB_ID`；先按上传门禁核对 `repo_id`、`--train-file`、`is_lfs:false`、文件大小和下载回验；若这些都通过且 system log 持续卡在数据集下载，按平台 mount 异常处理，不要让用户重复修同一份数据
+- `waiting_data` 超过 10 分钟：必须主动运行 `--diagnose JOB_ID`；先按上传门禁核对 `repo_id`、`--train-file`、文件大小和下载回验；若 `is_lfs:true`，先修复 LFS 并重提。若这些都通过且 system log 持续卡在数据集下载，按平台 mount 异常处理，不要让用户重复修同一份数据
 
 ### 监控进度
 
@@ -312,7 +313,8 @@ python3 "$SKILL_PATH/scripts/train.py" --logs JOB_ID --system  # 单独查 syste
 - `--logs` 查 stdout 是最可靠的 loss 监控方式，ERNIE/LlamaFactory 都支持
 - `--diagnose` 是异常排查首选，会主动拉 system log；用于 `waiting_data` 超时、`failed`、`cancelled`、平台挂载/调度问题
 - `--train-summary` 会从日志解析 loss/lr 并输出训练趋势，训练完成后依然有效
-- Tensorboard 仅训练中（running 阶段）最可靠；训练结束后可能显示 `INACTIVE`，也可能出现能列出 scalar tag 但曲线不渲染。不要把 Tensorboard 作为唯一验收依据，优先以 raw log、`--train-summary` 和本地导出的 CSV/PNG 曲线为准
+- Tensorboard 不是完全不可用：优先看 `Scalars` 面板。`Scalars` 能显示 loss/lr 等曲线时，说明 event file 和标量日志基本正常；`Time Series` 空白通常是新版 Tensorboard 面板兼容、前端缓存或加载问题，不等价于日志损坏或训练失败。训练结束后入口仍可能 `INACTIVE` 或部分面板不渲染，不要把 Tensorboard 作为唯一验收依据，优先以 raw log、`--train-summary` 和本地导出的 CSV/PNG 曲线为准
+- `logUrl` 是鉴权 API，不是公开网页。浏览器直接打开 `/v1/train/jobs/.../master/output.log` 可能返回 `Missing or invalid Authorization header`；请用 `--logs`、`--export-artifacts`，或带 `Authorization: Bearer $AISTUDIO_ACCESS_TOKEN` 的 requests/curl 拉取日志。Tensorboard 能打开不代表 log API 可匿名访问
 - `--poll` 会阻塞终端；对话场景不能长期占用终端时，改为周期性运行 `--status`、`--diagnose`、`--logs`、`--train-summary`
 
 ### 训练完成后
@@ -518,7 +520,7 @@ print(resp.json())
 
 | 错误 | 原因 | 解决 |
 |------|------|------|
-| `waiting_data` 超过 10 分钟 | 常见根因：仓库/路径不对、文件名写错、LFS 指针、平台挂载异常 | 按序排查：1）确认 `repo_id` 来自详情页；2）核对 `--train-file` 和仓库实际文件名；3）确认 `is_lfs:false` 且大小接近本地文件；4）下载回验 `--check-data`；5）若 system log 仍循环“正在等待数据集下载完成...”，说明可能是平台内部的数据集挂载任务卡住，保留 jobId 给平台排查，或取消后稍后重提 |
+| `waiting_data` 超过 10 分钟 | 常见根因：仓库/路径不对、文件名写错、LFS 指针、平台挂载异常 | 按序排查：1）确认 `repo_id` 来自详情页；2）核对 `--train-file` 和仓库实际文件名；3）确认文件大小接近本地文件；4）若 `is_lfs:true`，优先修复为普通 JSON/JSONL；5）下载回验 `--check-data`；6）若 system log 仍循环“正在等待数据集下载完成...”，说明可能是平台内部的数据集挂载任务卡住，保留 jobId 给平台排查，或取消后稍后重提 |
 | 提交时报数据集权限错误 | 常见不是公开权限问题，而是仓库路径不对、`gitlogin` 不匹配或文件没传成功 | 确认真实 `gitlogin` 和完整 `repo_id`，用新版数据集仓库重新上传 |
 | "非 ERNIE 格式" | Alpaca 格式，或 src/tgt 值是字符串非列表 | `{"src": ["问题"], "tgt": ["回答"]}` |
 | "类型错误：期望 float，实际 str" | 超参数是字符串 | 去掉引号：`3` 不是 `"3"` |
