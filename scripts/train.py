@@ -13,20 +13,19 @@
   train.py --open-tb <job_id>                    running 后打开 Tensorboard
   train.py --logs <job_id> [--system]            查看日志
   train.py --diagnose <job_id>                   主动诊断状态、system log 和 stdout
+  train.py --cancel <job_id>                     取消任务
   train.py --generate-dataset-readme FILE --train-data REPO_ID --train-file F --readme-out README.md
                                                 生成数据集 README
   train.py --generate-model-readme JOB_ID --readme-out README.md
                                                 生成模型 README
   train.py --push-readme REPO_ID --readme-file README.md
                                                 上传 README.md 到 AI Studio Git 仓库
-  train.py --cancel <job_id>                     取消任务
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
-import base64
 import json
 import math
 import os
@@ -35,6 +34,7 @@ import re
 import sys
 import time
 import warnings
+import base64
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -994,7 +994,7 @@ def _truncate_text(text: str, limit: int = 240) -> str:
     return text[: limit - 1].rstrip() + "…"
 
 
-def _write_text(path: Path, content: str) -> None:
+def _write_readme_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content.rstrip() + "\n", encoding="utf-8")
     print(f"已生成：{path}")
@@ -1118,7 +1118,7 @@ python3 scripts/train.py --submit \\
 - 如果包含医疗、法律、金融等专业内容，模型输出只能作为辅助参考，不应替代专业判断。
 - 如果训练文件来自公开数据集或二次处理数据，请确认原始数据许可允许再发布和模型训练。
 """
-    _write_text(Path(args.readme_out or "README.md"), content)
+    _write_readme_text(Path(args.readme_out or "README.md"), content)
 
 
 def _soft_fetch_log(job_id: str, token: str, base_url: str) -> str:
@@ -1218,7 +1218,7 @@ TensorBoard 如可访问，优先查看 `Scalars` 面板中的 loss/lr 曲线；
 - 如果训练样本较少，可能出现过拟合或只记住模板的情况。
 - 专业领域输出需要人工审核，不应替代专业判断。
 """
-    _write_text(Path(args.readme_out or "README.md"), content)
+    _write_readme_text(Path(args.readme_out or "README.md"), content)
 
 
 def _git_content_optional(repo_id: str, file_path: str, token: str, ref: str = "master") -> dict | None:

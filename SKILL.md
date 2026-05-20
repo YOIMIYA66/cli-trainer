@@ -31,7 +31,7 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data my_data.jsonl
 2. **鉴权** — 确认有 Access Token，没有就引导去 https://aistudio.baidu.com/account/accessToken 获取
 3. **选模型** — 运行 `--list-models` 展示白名单，让用户选，不要让用户自己猜名称
 4. **验数据** — 运行 `--check-data` 检查格式，提前发现错误
-5. **准备/上传数据集** — 只能访问 AiStudio 新版 Git 仓库型数据集，不支持外部 URL。创建仓库时先确认真实 `gitlogin`；用 Playwright MCP 或 `web-access` skill 创建仓库并拿到真实 `repo_id`；上传前删除 `.gitattributes` 中的 LFS 规则，上传后确认 `is_lfs: false`，并生成/上传数据集 `README.md`。
+5. **准备/上传数据集** — 只能访问 AiStudio 新版 Git 仓库型数据集，不支持外部 URL。创建仓库时先确认真实 `gitlogin`；用 Playwright MCP 或 `web-access` skill 创建仓库并拿到真实 `repo_id`；上传前删除 `.gitattributes` 中的 LFS 规则，上传后确认 `is_lfs: false`。
 6. **推荐超参** — 运行 `--suggest-params`，展示结果，**等用户确认后才提交**
 7. **提交训练** — 运行 `--submit`，拿到 jobId
 8. **监控训练** — 提交后运行 `--poll JOB_ID`；任务进入 running 且接口返回 `tensorboardUrl` 后自动打开 Tensorboard
@@ -195,29 +195,30 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data sharegpt_data.jsonl
    - 文件大小：仓库大小与本地大小是否一致或接近
    - 下一步将使用的提交参数：`--train-data "$REPO_ID" --train-file "$TRAIN_FILE"`
 
-7. **生成并上传数据集 README（发布门禁）**
-   训练文件上传验收后，必须生成数据集 README 并上传到同一个数据集仓库；不要等训练失败或用户提醒后再补。README 至少说明数据来源、样本数、训练格式、训练文件名、使用方式和限制。
-   ```bash
-   python3 "$SKILL_PATH/scripts/train.py" \
-     --generate-dataset-readme "$LOCAL_FILE" \
-     --train-data "$REPO_ID" \
-     --train-file "$TRAIN_FILE" \
-     --readme-out dataset_README.md \
-     --title "$REPO_ID"
-
-   python3 "$SKILL_PATH/scripts/train.py" \
-     --push-readme "$REPO_ID" \
-     --readme-file dataset_README.md \
-     --commit-message "docs: add dataset README"
-   ```
-   `--push-readme` 默认只创建新 README；如果 README 已存在，会拒绝覆盖。先把用户手写内容合并到本地 README，确认要替换时再加 `--overwrite`。
-
-8. **卡在 `waiting_data` 时按顺序排查**
+7. **卡在 `waiting_data` 时按顺序排查**
    - `REPO_ID` 是否来自详情页，`gitlogin` 是否真实可写
    - `--train-file` 是否和仓库内文件名完全一致
    - 训练文件是否 `is_lfs:false`，大小是否接近本地文件
    - 下载回本地后 `--check-data` 是否通过
    - 如果新 commit 和新 `mount Job` 仍循环“正在等待数据集下载完成...”，通常是平台挂载任务卡住；停止反复重传，保留 jobId、repo_id、commitId、mount Job 和上传校验结果给平台排查。
+
+**数据集 README 发布门禁**：训练文件上传验收后，生成数据集 README 并上传到同一个数据集仓库；不要等训练失败或用户提醒后再补。README 至少说明数据来源、样本数、训练格式、训练文件名、使用方式和限制。
+
+```bash
+python3 "$SKILL_PATH/scripts/train.py" \
+  --generate-dataset-readme "$LOCAL_FILE" \
+  --train-data "$REPO_ID" \
+  --train-file "$TRAIN_FILE" \
+  --readme-out dataset_README.md \
+  --title "$REPO_ID"
+
+python3 "$SKILL_PATH/scripts/train.py" \
+  --push-readme "$REPO_ID" \
+  --readme-file dataset_README.md \
+  --commit-message "docs: add dataset README"
+```
+
+`--push-readme` 默认只创建新 README；如果 README 已存在，会拒绝覆盖。先把用户手写内容合并到本地 README，确认要替换时再加 `--overwrite`。
 
 ### 推荐超参并确认
 
@@ -334,9 +335,36 @@ python3 "$SKILL_PATH/scripts/train.py" --train-summary 训练任务ID
 
 训练 `succeeded` 后，**必须自动完成以下两步，不要等用户提醒**：
 
-#### 第一步：生成并上传模型 README
+#### 第一步：通过 git 自动推送 README（已验证可行）
 
-使用脚本先生成 README，再通过 AI Studio Git contents API 更新模型仓库。不要把 token 拼进 Git URL，也不要把 token 写入 README、日志或 PR。
+AI Studio 模型仓库支持通过 git 推送，用 Access Token 作为密码：
+
+```bash
+# 将 REPO_ID 替换为实际仓库路径，如 18610248/train_c8979534
+cd /tmp && rm -rf model_readme_tmp
+git clone "https://$AISTUDIO_ACCESS_TOKEN:$AISTUDIO_ACCESS_TOKEN@git.aistudio.baidu.com/$REPO_ID.git" model_readme_tmp \
+  --no-checkout --depth=1 --filter=blob:none 2>&1 | tail -3
+
+cd /tmp/model_readme_tmp
+git sparse-checkout init --cone
+git sparse-checkout set README.md
+git checkout
+
+# 写入 README（见下方模板，按实际训练信息填充）
+cat > README.md << 'EOF'
+...内容见下方模板...
+EOF
+
+git config user.email "train@aistudio.baidu.com"
+git config user.name "AI Studio Train"
+git add README.md
+git commit -m "docs: 完善模型卡片 README"
+git push origin master
+```
+
+克隆时用 `--filter=blob:none --no-checkout` + sparse-checkout 只拉 README，跳过 LFS 大文件，速度快且不会因 LFS 报错中断。
+
+也可以优先用脚本生成 README，再通过 AI Studio Git contents API 上传，避免手写模板或把 token 拼进 Git URL：
 
 ```bash
 JOB_ID="训练任务ID"
@@ -358,6 +386,67 @@ python3 "$SKILL_PATH/scripts/train.py" \
 ```
 
 生成的 README 不能保留占位符；如果用户有项目说明、论文链接、评测截图或推理示例，合并到 `model_README.md` 后再上传。`--push-readme` 默认拒绝覆盖已有 README；确认已经合并并需要替换时，再显式追加 `--overwrite`。
+
+**README 模板**（禁止保留任何 `{}` 占位符；模型名用"基座简称-领域-用途"如 `Qwen2.5-7B-客服助手`；超参从 `--params` JSON 提取；Loss 从 `--train-summary` 提取；适用场景根据数据和模型名推断 3-5 个具体业务动作）：
+
+```markdown
+---
+license: Apache License 2.0
+---
+
+## {模型名称}介绍
+
+基于 {base_model}，用 {N} 条 {领域} 数据微调，擅长 {具体能力}。
+
+## 模型信息
+
+| 项目 | 详情 |
+|------|------|
+| 基座模型 | {base_model} |
+| 训练框架 | {ERNIEKit 或 LlamaFactory} |
+| 训练方式 | {SFT/Full 或 SFT/LoRA} |
+| 训练数据集 | [{repo_id}](https://aistudio.baidu.com/datasetdetail/{DATASET_ID}) |
+| 训练数据规模 | {N} 条 |
+| 语言 | {中文 / English} |
+| 开源协议 | Apache License 2.0 |
+
+### 训练配置
+
+| 超参数 | 值 |
+|--------|-----|
+| num_train_epochs | {值} |
+| learning_rate | {值} |
+| cutoff_len / max_seq_len | {值} |
+| per_device_train_batch_size | {值} |
+| bf16 / fp16 | {值} |
+（SFT/LoRA 时追加 lora_rank / lora_alpha / lora_dropout）
+
+### 训练结果
+
+起始 Loss {值} → 最终 Loss {值}，下降 {%}%，收敛{正常/需关注}。
+
+## 适用场景
+
+- {场景 1，如：回答患者用药副作用问题}
+- {场景 2}
+- {场景 3}
+
+## 如何使用
+
+```python
+import requests
+resp = requests.post(
+    "https://aistudio.baidu.com/llm/lmapi/v1/chat/completions",
+    headers={"Content-Type": "application/json", "Authorization": "token YOUR_TOKEN"},
+    json={"model": "{REPO_ID}", "messages": [{"role": "user", "content": "你的问题"}]}
+)
+print(resp.json()["choices"][0]["message"]["content"])
+```
+
+## 局限性
+
+{训练数据分布局限、cutoff_len 截断风险、LoRA adapter 依赖基座等}
+```
 
 #### 第二步：设置模型元信息标签 + 确认公开状态
 
@@ -470,15 +559,15 @@ python3 "$SKILL_PATH/scripts/train.py" --cancel JOB_ID  # 取消卡住的任务
 --status <job_id>               查看任务状态
 --logs <job_id> [--system]      查看训练日志（stdout loss）
 --diagnose <job_id>             主动诊断状态、system log 和 stdout
+--train-summary <job_id>         训练完成后汇报 loss/lr 趋势和健康状态
+--poll <job_id>                 持续轮询（阻塞终端，对话场景不推荐）
+--cancel <job_id>               取消任务
 --generate-dataset-readme FILE --train-data REPO_ID --train-file F --readme-out README.md
                                  根据本地训练文件生成数据集 README
 --generate-model-readme JOB_ID --readme-out README.md
                                  根据训练任务状态和日志生成模型 README
 --push-readme REPO_ID --readme-file README.md
                                  上传 README.md 到 AI Studio Git 仓库；已有 README 时需加 --overwrite
---train-summary <job_id>         训练完成后汇报 loss/lr 趋势和健康状态
---poll <job_id>                 持续轮询（阻塞终端，对话场景不推荐）
---cancel <job_id>               取消任务
 
 --api-key TOKEN / --env-file FILE / --base-url URL
 ```
