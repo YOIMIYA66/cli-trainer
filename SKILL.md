@@ -391,9 +391,11 @@ git sparse-checkout init --cone
 git sparse-checkout set README.md
 git checkout
 
-# 写入 README，内容按 model-card-spec.md 生成（见下文）
+# 以标准模板为起点写入 README，按实际训练数据填充，无法获取的字段连同对应行删除
+cp "$SKILL_PATH/references/model-card-spec.md" README.md   # 用编辑器/heredoc 替换占位符后提交
+# 或直接 heredoc 覆盖：
 cat > README.md << 'READMEEOF'
-...按 model-card-spec.md 填充，不留占位符...
+...以 model-card-spec.md §四 标准模板为起点，填充实际值，不留占位符...
 READMEEOF
 
 git config user.email "$GIT_USER_EMAIL"   # 替换为真实邮箱，或用 git global config
@@ -403,7 +405,7 @@ git commit -m "docs: 完善模型卡片 README"
 GIT_ASKPASS="$ASKPASS_FILE" GIT_TERMINAL_PROMPT=0 git push origin master
 ```
 
-**Model Card 内容按 `$SKILL_PATH/references/model-card-spec.md` 生成。** 读取该文件，根据实际训练数据填充各字段；无法获取的字段直接省略，不留占位符。
+**Model Card 内容以 `$SKILL_PATH/references/model-card-spec.md` §四 标准模板为起点生成。** 根据实际训练数据填充各字段；无法获取的字段连同对应行一起删除，不留占位符。
 
 #### 第二步：设置模型元信息标签 + 确认公开状态
 
