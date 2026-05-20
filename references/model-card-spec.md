@@ -1,6 +1,6 @@
-# Model Card 规范（AI Studio 无代码微调）
+# Model Card / Readme 规范
 
-AI Studio 无代码微调工具在训练完成后，用本规范生成衍生模型的 Model Card（README.md）。
+训练完成后，用本规范生成模型仓库的 README.md（Model Card）。
 
 ---
 
