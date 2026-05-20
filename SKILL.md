@@ -165,10 +165,7 @@ python3 "$SKILL_PATH/scripts/train.py" --check-data sharegpt_data.jsonl
    - ERNIE 的 `src/tgt` JSONL、LlamaFactory 的 Alpaca/ShareGPT JSONL/JSON 都要检查；训练用 JSON/JSONL 推荐作为普通文件上传，便于下载回验和排查。
    - 如果已经上传成 LFS：不要直接判定训练必然失败。已实测部分 `is_lfs:true` 文件也可能被 AI Studio 成功挂载并完成训练；但它会降低可回验性，也会让 `waiting_data` 排查更困难。若任务卡在 `waiting_data`，优先删除旧 LFS 训练文件、移除 `.gitattributes` 中 JSON/JSONL LFS 规则，然后按本上传小节第 5 步 SDK 方案或第 6 步 CLI 方案重新上传。
 
-4. **上传前检查普通文件大小**
-   - AI Studio Git 仓库普通文件上传可能拒绝超过 5MB 的 JSON/JSONL；不要为了绕过大小限制默认改走 LFS。优先 compact/crop/split，并保留 manifest；如果最终只能走 LFS，要在回执里明确记录 `is_lfs:true` 风险。
-   - 如果训练 JSON/JSONL 超过 5MB，先停止上传并向用户说明取舍。可选处理：压缩固定 prompt、裁剪过长上下文、减少 replay、拆分实验档，或确认平台是否支持该任务的多文件训练。
-   - 做过裁剪或 compact 处理时，必须保留 manifest，记录源文件、输出文件、样本数是否变化、截断规则、被截断样本数和原因。不要把 compact 文件伪装成未裁剪的完整数据。
+4. **上传前检查文件大小**：普通文件超过 5MB 平台会拒绝，不要改走 LFS 绕过限制。超过 5MB 时先告知用户，可选：裁剪过长样本、减少数据量、拆分批次，或确认平台是否支持多文件训练。
 
 5. **用 SDK 上传数据集文件夹（推荐）**
    - 上传原则见 `references/aistudio_sdk_upload.md`；主规则是：完整 `repo_id`、一仓一数据集、token 只走环境变量、JSON/JSONL 优先不走 LFS。
