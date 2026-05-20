@@ -13,6 +13,7 @@
   train.py --open-tb <job_id>                    running 后打开 Tensorboard
   train.py --logs <job_id> [--system]            查看日志
   train.py --diagnose <job_id>                   主动诊断状态、system log 和 stdout
+  train.py --export-artifacts <job_id> --out DIR 导出训练日志、指标 CSV 和曲线图
   train.py --cancel <job_id>                     取消任务
 """
 
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import csv
 import json
 import math
 import os
@@ -49,6 +51,7 @@ GIT_BASE_URL = "https://git.aistudio.baidu.com"
 TOKEN_ENV_VARS = ("AISTUDIO_ACCESS_TOKEN", "AISTUDIO_API_KEY")
 WHITELIST_PATH = Path(__file__).parent.parent / "references" / "model_whitelist.yaml"
 AISTUDIO_CLI_TOKEN_PATH = Path.home() / ".cache" / "aistudio" / ".auth" / "token"
+COMMON_UPLOAD_WARN_BYTES = 5 * 1024 * 1024
 
 # --------------------------- whitelist ---------------------------- #
 
@@ -658,19 +661,29 @@ def cmd_suggest_params(args: argparse.Namespace) -> None:
     if not n:
         die("文件中没有可解析的有效训练样本，请先用 --check-data 检查数据格式。")
 
-    # 估算平均序列长度（用有效行）
-    sample = valid_lines[:min(100, n)]
-    avg_len = sum(len(l) for l in sample) / len(sample) if sample else 200
-    suggested_seq_len = min(2048, max(128, int(math.ceil(avg_len / 64) * 64)))
+    lengths = [len(line) for line in valid_lines]
+    avg_len = sum(lengths) / len(lengths)
+    p50_len = _percentile(lengths, 0.50)
+    p90_len = _percentile(lengths, 0.90)
+    p95_len = _percentile(lengths, 0.95)
+    max_len = max(lengths)
+    suggested_seq_len = min(2048, max(128, int(math.ceil(p90_len / 64) * 64)))
 
     model_type = (args.model_type or "ernie").lower()
+    size_bytes = path.stat().st_size
+    size_mb = size_bytes / (1024 * 1024)
 
     print(f"\n{chr(45) * 50}")
     print(f"  数据集：{path.name}")
     print(f"  文件容器：{'JSON 数组' if data_kind == 'json_array' else 'JSONL'}")
     print(f"  样本数：{n}")
-    print(f"  平均字符长度：{avg_len:.0f}  ->  建议 max_seq_len / cutoff_len：{suggested_seq_len}")
+    print(f"  文件大小：{size_bytes} bytes ({size_mb:.2f} MB)")
+    print(f"  字符长度：avg={avg_len:.0f}  p50={p50_len:.0f}  p90={p90_len:.0f}  p95={p95_len:.0f}  max={max_len}")
+    print(f"  建议 max_seq_len / cutoff_len：{suggested_seq_len}")
     print(f"  模型类型：{model_type}")
+    if _is_json_training_file(path) and size_bytes > COMMON_UPLOAD_WARN_BYTES:
+        print("\n  [!] 上传风险：普通 JSON/JSONL 文件超过约 5MB，AI Studio 可能拒绝普通文件上传。")
+        print("      不要改用 LFS 训练文件；优先 compact/crop/split，并保留 manifest。")
     print("-" * 50)
 
     if model_type == "ernie":
@@ -695,6 +708,7 @@ def _suggest_ernie(n: int, seq_len: int) -> None:
         "per_device_train_batch_size": batch,
         "learning_rate": lr,
         "max_seq_len": seq_len,
+        "max_steps": -1,
         "warmup_steps": min(100, max(10, n // 10)),
         "logging_steps": 5,
         "save_steps": 500,
@@ -745,6 +759,24 @@ def _print_params(params: dict, note: str, framework: str) -> None:
     print(f"\n  提示：可以调整这些参数，调整后加 --params '{{...}}' 传给 --submit 命令。")
     print(f"  重要：超参数类型必须是数字/布尔，不能加引号。")
     print()
+
+
+def _percentile(values: list[int], q: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return float(ordered[0])
+    pos = (len(ordered) - 1) * q
+    lo = math.floor(pos)
+    hi = math.ceil(pos)
+    if lo == hi:
+        return float(ordered[int(pos)])
+    return ordered[lo] + (ordered[hi] - ordered[lo]) * (pos - lo)
+
+
+def _is_json_training_file(path: Path) -> bool:
+    return path.suffix.lower() in {".json", ".jsonl"}
 
 
 # ------------------------------ submit ----------------------- #
@@ -914,13 +946,18 @@ def cmd_verify_upload(args: argparse.Namespace) -> None:
     print("-" * 55)
 
     if is_lfs is not False:
-        die(
-            "训练文件不是普通 JSON/JSONL（is_lfs 不是 false）。\n"
-            "请到数据集文件页编辑 .gitattributes，删除训练文件扩展名对应的 LFS 规则，"
-            "再删除旧训练文件并重新上传。"
+        msg = (
+            "训练文件 is_lfs:true。推荐修复为普通 JSON/JSONL（is_lfs:false），"
+            "这样下载回验和 waiting_data 排查更可靠；实测部分 LFS 文件也可能训练成功。"
         )
-
-    if local_size is not None and isinstance(size, int) and local_size != size:
+        if getattr(args, "strict_lfs", False):
+            die(
+                msg + "\n"
+                "请到数据集文件页编辑 .gitattributes，删除训练文件扩展名对应的 LFS 规则，"
+                "再删除旧训练文件并重新上传；或确认风险后去掉 --strict-lfs。"
+            )
+        print(f"[!]  {msg}")
+    elif local_size is not None and isinstance(size, int) and local_size != size:
         print("[!]  仓库文件大小与本地文件不一致，请下载回本地后再跑 --check-data 确认内容。")
     else:
         print("[OK] 上传完成，训练文件是普通文件（is_lfs:false）。")
@@ -928,6 +965,8 @@ def cmd_verify_upload(args: argparse.Namespace) -> None:
     print("\n提交训练时使用：")
     print(f"  --train-data {args.train_data}")
     print(f"  --train-file {args.train_file}")
+    if is_lfs is not False:
+        print("  # 注意：当前训练文件 is_lfs:true。若后续卡在 waiting_data，先修复 LFS 后重提。")
     print()
 
 
@@ -1253,13 +1292,23 @@ def cmd_poll(args: argparse.Namespace) -> None:
 
 # -------------------------------- logs ------------------------ #
 
-def _fetch_job_log(job_id: str, token: str, base_url: str, system: bool = False, byte_limit: int = 409500, soft: bool = False) -> str:
+def _fetch_job_log(
+    job_id: str,
+    token: str,
+    base_url: str,
+    system: bool = False,
+    byte_limit: int = 409500,
+    soft: bool = False,
+) -> str:
     log_file = "system.log" if system else "master/output.log"
     url = base_url.rstrip("/") + f"/v1/train/jobs/{job_id}/{log_file}"
+    safe_limit = max(1, int(byte_limit or 409500))
+    # AI Studio 日志接口不支持 suffix range（bytes=-N），只支持 bytes=start-end。
+    byte_range = f"bytes=0-{safe_limit - 1}"
 
     resp: requests.Response
     try:
-        resp = requests.get(url, headers={**headers(token), "Range": f"bytes=0-{byte_limit}"}, timeout=30)
+        resp = requests.get(url, headers={**headers(token), "Range": byte_range}, timeout=30)
     except Exception as e:
         msg = f"获取{'system log' if system else 'stdout 日志'}失败：{e}"
         if soft:
@@ -1481,6 +1530,208 @@ def cmd_train_summary(args: argparse.Namespace) -> None:
     print()
 
 
+# -------------------------- export artifacts ----------------- #
+
+def cmd_export_artifacts(args: argparse.Namespace) -> None:
+    token = load_token(args)
+    job_id = args.export_artifacts
+    out_dir = Path(args.out or f"training_artifacts/{job_id}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"导出训练证据：{job_id}")
+    print(f"输出目录：{out_dir}")
+
+    job_detail = api("GET", f"/v1/train/jobs/{job_id}", token, args.base_url)
+    _write_text(out_dir / "job_detail.json", json.dumps(job_detail, ensure_ascii=False, indent=2))
+
+    stdout_log = _fetch_job_log(
+        job_id,
+        token,
+        args.base_url,
+        system=False,
+        byte_limit=args.log_bytes,
+        soft=True,
+    )
+    system_log = _fetch_job_log(
+        job_id,
+        token,
+        args.base_url,
+        system=True,
+        byte_limit=args.log_bytes,
+        soft=True,
+    )
+    _write_text(out_dir / "master_output_raw.log", stdout_log)
+    _write_text(out_dir / "system_raw.log", system_log)
+
+    metrics = _parse_metrics(stdout_log.splitlines()) if not stdout_log.startswith("[!] ") else []
+    summary = _build_training_summary_text(job_id, stdout_log, metrics)
+    _write_text(out_dir / "train_summary.txt", summary)
+
+    csv_path = out_dir / "loss_curve.csv"
+    _write_metrics_csv(csv_path, metrics)
+
+    chart_paths = _write_metric_charts(out_dir, metrics)
+
+    print("\n导出完成：")
+    for path in [
+        out_dir / "job_detail.json",
+        out_dir / "master_output_raw.log",
+        out_dir / "system_raw.log",
+        out_dir / "train_summary.txt",
+        csv_path,
+        *chart_paths,
+    ]:
+        if path.exists():
+            print(f"  {path}")
+    if not metrics:
+        print("\n[!] 未解析到 loss 指标；已保留 raw log，请先检查任务是否进入 running 或日志格式是否变化。")
+    elif not chart_paths:
+        print("\n提示：未生成 PNG 曲线图。如需图表，请安装 matplotlib 后重试：pip install matplotlib")
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.write_text(text.rstrip() + "\n", encoding="utf-8")
+
+
+def _write_metrics_csv(path: Path, metrics: list[dict]) -> None:
+    preferred = ["index", "step", "loss", "learning_rate", "epoch", "perplexity", "grad_norm"]
+    extra = sorted({str(k) for m in metrics for k in m.keys()} - set(preferred))
+    fieldnames = preferred + extra
+
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for idx, metric in enumerate(metrics, start=1):
+            row = {"index": idx}
+            for key in fieldnames:
+                if key == "index":
+                    continue
+                val = metric.get(key)
+                if val is not None:
+                    row[key] = val
+            writer.writerow(row)
+
+
+def _build_training_summary_text(job_id: str, content: str, metrics: list[dict]) -> str:
+    lines = content.splitlines()
+    output: list[str] = [
+        "-" * 50,
+        f"训练汇报 - {job_id}",
+        "-" * 50,
+        "",
+    ]
+
+    if not content.strip():
+        output.append("日志为空（任务可能还在等待中，或尚未产生训练日志）")
+        return "\n".join(output)
+
+    if not metrics:
+        output.append("未能解析到 loss 指标，以下是日志末尾 20 行（供参考）：")
+        output.extend(lines[-20:])
+        return "\n".join(output)
+
+    losses = [float(m["loss"]) for m in metrics]
+    lrs = [float(m["learning_rate"]) for m in metrics if m.get("learning_rate") is not None]
+    first_loss, last_loss = losses[0], losses[-1]
+    min_loss, max_loss = min(losses), max(losses)
+    drop_pct = (first_loss - last_loss) / first_loss * 100 if first_loss > 0 else 0
+
+    if drop_pct > 10:
+        verdict = "[OK] 明显下降，训练收敛正常"
+    elif drop_pct > 2:
+        verdict = "[OK] 轻微下降，可以尝试增加 epochs"
+    elif drop_pct > -2:
+        verdict = "[!!] 基本持平，建议调小学习率或增加 epochs"
+    else:
+        verdict = "[!!] loss 上升，训练不稳定，建议检查数据质量和学习率"
+
+    change_str = f"loss 下降 {drop_pct:.1f}%" if drop_pct >= 0 else f"loss 上升 {abs(drop_pct):.1f}%"
+    output.extend([
+        f"[loss 趋势]  共 {len(metrics)} 条记录",
+        f"  起始：{first_loss:.4f}  ->  最终：{last_loss:.4f}",
+        f"  最低：{min_loss:.4f}  最高：{max_loss:.4f}",
+        f"  变化：{change_str}  {verdict}",
+    ])
+
+    if lrs:
+        output.extend([
+            "",
+            "[学习率]",
+            f"  起始：{lrs[0]:.2e}  最终：{lrs[-1]:.2e}",
+        ])
+        if lrs[-1] < lrs[0] * 0.5:
+            output.append("  趋势：lr 已衰减（正常，调度器生效）")
+        elif lrs[-1] > lrs[0]:
+            output.append("  趋势：lr 先升（warmup 阶段）")
+
+    error_lines = [l for l in lines if re.search(r"\b(error|exception|traceback)\b", l, re.IGNORECASE)]
+    if error_lines:
+        output.extend(["", f"[!!] 发现 {len(error_lines)} 条错误/异常（最后 3 条）："])
+        output.extend(f"  {l[:120]}" for l in error_lines[-3:])
+
+    return "\n".join(output)
+
+
+def _write_metric_charts(out_dir: Path, metrics: list[dict]) -> list[Path]:
+    if len(metrics) < 2:
+        return []
+
+    try:
+        import matplotlib.pyplot as plt  # type: ignore
+    except Exception:
+        return []
+
+    xs = [int(m.get("step") or i) for i, m in enumerate(metrics, start=1)]
+    losses = [float(m["loss"]) for m in metrics]
+    lrs = [float(m["learning_rate"]) for m in metrics if m.get("learning_rate") is not None]
+    lr_xs = [int(m.get("step") or i) for i, m in enumerate(metrics, start=1) if m.get("learning_rate") is not None]
+    paths: list[Path] = []
+
+    loss_path = out_dir / "loss_curve.png"
+    plt.figure(figsize=(10, 4))
+    plt.plot(xs, losses, linewidth=1.8)
+    plt.title("Training Loss")
+    plt.xlabel("step")
+    plt.ylabel("loss")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(loss_path, dpi=160)
+    plt.close()
+    paths.append(loss_path)
+
+    if lrs:
+        lr_path = out_dir / "learning_rate_curve.png"
+        plt.figure(figsize=(10, 4))
+        plt.plot(lr_xs, lrs, linewidth=1.8)
+        plt.title("Learning Rate")
+        plt.xlabel("step")
+        plt.ylabel("learning_rate")
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(lr_path, dpi=160)
+        plt.close()
+        paths.append(lr_path)
+
+        combined_path = out_dir / "training_curves.png"
+        fig, ax1 = plt.subplots(figsize=(10, 4))
+        ax1.plot(xs, losses, color="#1f77b4", linewidth=1.8, label="loss")
+        ax1.set_xlabel("step")
+        ax1.set_ylabel("loss", color="#1f77b4")
+        ax1.tick_params(axis="y", labelcolor="#1f77b4")
+        ax1.grid(True, alpha=0.3)
+        ax2 = ax1.twinx()
+        ax2.plot(lr_xs, lrs, color="#d62728", linewidth=1.4, label="learning_rate")
+        ax2.set_ylabel("learning_rate", color="#d62728")
+        ax2.tick_params(axis="y", labelcolor="#d62728")
+        plt.title("Training Curves")
+        fig.tight_layout()
+        plt.savefig(combined_path, dpi=160)
+        plt.close(fig)
+        paths.append(combined_path)
+
+    return paths
+
+
 # ------------------------------- cancel ----------------------- #
 
 def cmd_cancel(args: argparse.Namespace) -> None:
@@ -1618,6 +1869,7 @@ def build_parser() -> argparse.ArgumentParser:
     # 子命令
     p.add_argument("--verify-token", action="store_true", help="验证 Access Token 是否有效")
     p.add_argument("--verify-upload", action="store_true", help="验证数据集上传结果并打印回执")
+    p.add_argument("--strict-lfs", action="store_true", help="配合 --verify-upload：is_lfs 不是 false 时直接失败")
     p.add_argument("--list-models", action="store_true", help="列出平台白名单中所有可用模型")
     p.add_argument("--list-datasets", action="store_true", help="列出内置推荐数据集（不用自己准备数据）")
     p.add_argument("--check-data", metavar="FILE", help="检查数据格式")
@@ -1633,6 +1885,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cancel", metavar="JOB_ID", help="取消任务")
     p.add_argument("--open-tb", metavar="JOB_ID", help="任务 running 后打开 Tensorboard")
     p.add_argument("--train-summary", metavar="JOB_ID", help="训练完成后汇报 loss/lr 趋势")
+    p.add_argument("--export-artifacts", metavar="JOB_ID", help="导出 job detail、raw logs、指标 CSV 和曲线图")
+    p.add_argument("--out", metavar="DIR", help="输出目录（配合 --export-artifacts）")
+    p.add_argument("--log-bytes", type=int, default=5_000_000, metavar="N", help="导出日志最大字节数（默认 5000000；AI Studio 日志接口使用 bytes=0-N）")
 
     # submit 参数
     p.add_argument("--submit", action="store_true", help="提交训练任务")
@@ -1692,6 +1947,8 @@ def main() -> None:
         cmd_open_tb(args)
     elif args.train_summary:
         cmd_train_summary(args)
+    elif args.export_artifacts:
+        cmd_export_artifacts(args)
     else:
         parser.print_help()
 
